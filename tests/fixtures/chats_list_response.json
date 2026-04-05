@@ -1,0 +1,26 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "chats": [
+      {
+        "id": 7,
+        "identifier": "iMessage;-;+14155550101",
+        "guid": "iMessage;-;+14155550101",
+        "name": "Alex",
+        "service": "iMessage",
+        "last_message_at": "2026-04-04T09:15:00Z",
+        "participants": ["+14155550101"]
+      },
+      {
+        "id": 12,
+        "identifier": "iMessage;+;chat123456789",
+        "guid": "iMessage;+;chat123456789",
+        "name": "Family",
+        "service": "iMessage",
+        "last_message_at": "2026-04-04T08:00:00Z",
+        "participants": ["+14155550102", "+14155550103", "+14155550104"]
+      }
+    ]
+  }
+}

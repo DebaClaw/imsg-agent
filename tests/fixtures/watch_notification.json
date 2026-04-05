@@ -1,0 +1,21 @@
+{
+  "jsonrpc": "2.0",
+  "method": "message",
+  "params": {
+    "subscription": 1,
+    "message": {
+      "id": 12345,
+      "chat_id": 7,
+      "guid": "AAAABBBB-1111-2222-3333-444455556666",
+      "sender": "+14155550101",
+      "text": "Hey, are we still on for Thursday?",
+      "created_at": "2026-04-04T10:30:00Z",
+      "is_from_me": false,
+      "service": "iMessage",
+      "attachments": [],
+      "reactions": [],
+      "reply_to_guid": null,
+      "destination_caller_id": null
+    }
+  }
+}

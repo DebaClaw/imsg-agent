@@ -1,0 +1,13 @@
+{
+  "imsg_binary": "~/src/imsg/bin/imsg",
+  "data_dir": "~/imsg-data",
+  "rpc_timeout_seconds": 30,
+  "watch_debounce_ms": 250,
+  "history_limit": 50,
+  "chat_context_messages": 20,
+  "auto_approve": false,
+  "default_service": "auto",
+  "max_inbox_age_hours": 48,
+  "quiet_hours_start": null,
+  "quiet_hours_end": null
+}
