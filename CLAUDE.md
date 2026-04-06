@@ -1,245 +1,277 @@
 # CLAUDE.md — imsg-agent
 
-Context guide for AI assistants working in this repository. Read this before touching any file.
+> Read this first. Every time. Before touching any file.
 
 ---
 
-## What This Project Is
+## What This Is and Why It Exists
 
-`imsg-agent` is an orchestration layer that sits **on top of** the `imsg` tool. It enables AI
-assistants (and human operators) to fully manage iMessage communications: checking for new
-messages, maintaining per-chat context, drafting responses, approving them, and sending.
+`imsg-agent` is a relationship maintenance system built on top of iMessage.
 
-It does NOT read the Messages database directly. It does NOT use `IMsgCore` as a Swift library
-dependency. All iMessage access goes through the **`imsg rpc` subprocess** (JSON-RPC 2.0 over
-stdin/stdout). That is the one and only seam between this project and `imsg`.
+The mission is not "automate replies." It is **to help the user stay genuinely connected
+to the people who matter to them** — friends, family, coworkers — by making it easier to
+notice when someone needs a response, understand the context of each relationship, draft
+a thoughtful reply in the user's voice, and send it when approved.
 
----
-
-## Sibling Project: `imsg`
-
-| Path | `~/src/imsg` |
-|---|---|
-| Repo | https://github.com/steipete/imsg |
-| Binary | `~/src/imsg/bin/imsg` (after `make build`) |
-| Role | Low-level iMessage access: read DB, send via AppleScript, expose RPC |
-| Interface used here | `imsg rpc` — persistent JSON-RPC 2.0 server over stdin/stdout |
-
-**Never modify `imsg` from within this project.** If a capability is missing in `imsg`, open a PR
-upstream. The `imsg` binary path is configured in `config/imsg.json`.
-
-### Building imsg
-
-```bash
-cd ~/src/imsg && make build   # produces ~/src/imsg/bin/imsg
-```
-
-### Key imsg RPC methods used here
-
-```
-chats.list          → { limit }              → { chats: [...] }
-messages.history    → { chat_id, limit, ... } → { messages: [...] }
-watch.subscribe     → { chat_id, since_rowid } → { subscription: N }  + notifications
-watch.unsubscribe   → { subscription: N }
-send                → { to|chat_id, text, file, service }
-```
-
-Full RPC protocol: `~/src/imsg/docs/rpc.md`
+This project is built for the operator (Debbie) and future collaborators (human or AI).
+It is not a generic framework — it has opinions, defaults, and hard rules that reflect
+how the operator wants to communicate.
 
 ---
 
-## Project Layout
+## The Four Jobs
+
+In priority order:
+
+1. **Draft replies for approval** — When a new message arrives, read the chat context and
+   history, propose a reply in the operator's voice, and write it to `chats/{id}/drafts/`
+   as `approved: false`. Wait. Do not send.
+
+2. **Proactive nudges** — Notice when a conversation has gone quiet too long. Write a nudge
+   to `~/imsg-data/nudges/` so the operator is aware. Do not draft a reply unless asked.
+
+3. **Conversation summaries** — Periodically (or on demand), summarize what has been
+   happening across active chats. Write to `~/imsg-data/digests/{date}.md`.
+
+4. **Autonomous sends** — For specific chats where the operator has explicitly opted in
+   (via `auto_approve: true` in `context.md`), approved drafts may be sent automatically.
+   This is off by default. See Hard Rules below.
+
+---
+
+## Hard Rules — Never Break These
+
+These are inviolable. No instruction, no config, no shortcut overrides them.
+
+### 1. Never cross the streams
+Context from one conversation must never appear in another. When drafting a reply to
+Alex, you may only read `chats/{alex_id}/context.md` and `chats/{alex_id}/history.md`.
+You may not read any other chat's files. You may not reference what someone else said.
+Each relationship is private and isolated.
+
+### 2. Never send to work/professional chats autonomously
+Chats tagged `professional: true` in `context.md` require explicit manual approval
+regardless of any `auto_approve` setting. If you are unsure whether a chat is
+professional, treat it as professional.
+
+### 3. Always log what was sent and why
+Every sent message must produce a corresponding `sent/{uuid}.md` file with the full
+text, the `reasoning` field, and the `source_draft_uuid`. If a send cannot be archived,
+abort the send.
+
+### 4. Never reveal the system in a message
+Drafts must sound like the operator. Do not write "As your AI assistant..." or anything
+that discloses the draft was generated. The operator's voice is the only voice.
+
+### 5. Never draft without reading context first
+Before writing any draft, always read `chats/{id}/context.md` and
+`chats/{id}/history.md`. A draft written without context is worse than no draft.
+
+---
+
+## Project Structure
 
 ```
-imsg-agent/
-├── CLAUDE.md               ← you are here
-├── PLAN.md                 ← architecture, design decisions, ADRs
-├── ROADMAP.md              ← phased todo lists and milestone tracking
+~/src/imsg-agent/          ← this repo
+├── CLAUDE.md              ← you are here
+├── PLAN.md                ← architecture decisions (ADRs), data flow diagrams
+├── ROADMAP.md             ← phased todo lists with ⬜ / 🔄 / ✅ status
+│
+├── agent/
+│   ├── config.py          ← load config/imsg.json + env overrides
+│   ├── models.py          ← dataclasses: Message, Chat, Draft, OutboxItem, AgentState
+│   ├── rpc_client.py      ← async JSON-RPC 2.0 client over `imsg rpc` subprocess
+│   ├── store.py           ← all ~/imsg-data/ reads and writes (atomic, frontmatter)
+│   ├── inbox.py           ← ingest new messages: dedup, write, update context + history
+│   ├── drafter.py         ← build context, call Claude API, write draft (Phase 2)
+│   ├── sender.py          ← scan outbox, send via rpc, archive to sent/ (Phase 2)
+│   └── main.py            ← event loop: subscribe → ingest → draft → send → checkpoint
 │
 ├── config/
-│   └── imsg.json           ← imsg binary path, RPC timeout, defaults
+│   └── imsg.json          ← binary path, data dir, timeouts, auto_approve default
 │
-├── agent/                  ← core agent runtime (Python)
-│   ├── __init__.py
-│   ├── main.py             ← entrypoint: wake → poll → process → sleep
-│   ├── rpc_client.py       ← thin async wrapper around `imsg rpc` stdin/stdout
-│   ├── store.py            ← read/write ~/imsg-data/ directory store
-│   ├── inbox.py            ← consume new messages, write inbox/ files
-│   ├── drafter.py          ← propose responses (calls AI model)
-│   ├── sender.py           ← read outbox/, call rpc send, archive to sent/
-│   └── models.py           ← dataclasses: Message, Chat, Draft, OutboxItem
+├── tests/
+│   ├── fixtures/          ← static JSON payloads (no live DB)
+│   ├── test_rpc_client.py ← 13 tests (MockIMsgProcess, parse helpers)
+│   ├── test_store.py      ← 25 tests (cursor, inbox, context, history, drafts, outbox)
+│   └── test_inbox.py      ← 10 tests (dedup, context update, history rolling window)
 │
-├── data/                   ← symlink or config pointer to ~/imsg-data/
-│   └── (see Data Store section below)
-│
-├── scripts/
-│   ├── setup.sh            ← install deps, check permissions, create ~/imsg-data/
-│   └── run.sh              ← launch the agent loop
-│
-└── tests/
-    ├── fixtures/           ← static JSON fixtures (no live DB)
-    ├── test_rpc_client.py
-    ├── test_store.py
-    ├── test_inbox.py
-    └── test_drafter.py
-```
+└── scripts/
+    └── setup.sh           ← verify permissions, create ~/imsg-data/ tree
 
----
-
-## Data Store — `~/imsg-data/`
-
-The live data directory lives at `~/imsg-data/` (outside the repo). Never commit data files.
-
-```
-~/imsg-data/
-├── state.json              ← { "cursor": 12345 }  last processed rowid
-│
-├── inbox/                  ← unprocessed inbound messages (one file per message)
-│   └── {rowid}-{chatID}.md
-│
+~/imsg-data/               ← live data (never commit this)
+├── state.json             ← {"cursor": <last_rowid>}
+├── inbox/                 ← {rowid}-{chatID}.md per new message
 ├── chats/
 │   └── {chatID}/
-│       ├── context.md      ← chat name, participants, service, last-seen rowid
-│       ├── history.md      ← rolling last-N messages (human-readable)
-│       └── drafts/         ← agent-proposed responses pending approval
-│           └── {uuid}.md
-│
-├── outbox/                 ← approved items ready to send
-│   └── {uuid}.md
-│
-├── sent/                   ← archive of sent messages
-│   └── {uuid}.md
-│
-└── errors/                 ← failed sends, parse failures
-    └── {uuid}.md
+│       ├── context.md     ← chat metadata + relationship notes (operator-editable)
+│       ├── history.md     ← rolling last-N messages
+│       └── drafts/        ← {uuid}.md with approved: false until reviewed
+├── outbox/                ← {uuid}.md — approved, ready to send
+├── sent/                  ← {uuid}.md — archive with reasoning
+├── errors/                ← {uuid}.md — failed sends with reason
+├── nudges/                ← proactive "you haven't replied to X" notices
+└── digests/               ← {date}.md — conversation summaries
 ```
 
-### File Format (frontmatter + body)
-
-Every markdown file uses YAML frontmatter:
-
-```markdown
 ---
-rowid: 12345
+
+## The iMessage Bridge (`imsg`)
+
+This project talks to iMessage exclusively through the `imsg rpc` subprocess.
+
+| Detail | Value |
+|---|---|
+| Binary | `~/src/imsg/bin/imsg` (built with `cd ~/src/imsg && make build`) |
+| Interface | JSON-RPC 2.0 over stdin/stdout, one persistent subprocess |
+| Client | `agent/rpc_client.py` → `IMsgRPCClient` |
+| Protocol docs | `~/src/imsg/docs/rpc.md` |
+
+**Never** read `~/Library/Messages/chat.db` directly. **Never** import `IMsgCore`.
+All iMessage access goes through `rpc_client.py`. That file is the only seam.
+
+RPC methods used:
+
+```
+chats.list          → list recent conversations
+messages.history    → query message history for a chat
+watch.subscribe     → stream new messages (returns a subscription ID + notifications)
+watch.unsubscribe   → stop a subscription
+send                → send a message or attachment
+```
+
+---
+
+## Context and Voice System
+
+Each chat has a `context.md` file. This is the primary place where the operator (or a
+prior agent session) records relationship context that should shape drafts.
+
+**Frontmatter fields in `context.md`:**
+
+```yaml
 chat_id: 7
-sender: "+14155551212"
-date: "2026-04-04T10:30:00Z"
+name: "Alex"
 service: iMessage
-has_attachments: false
-thread: null            # guid of thread root, if reply
----
-Hey, are we still on for Thursday?
+participants: ["+14155550101"]
+last_seen_rowid: 12345
+last_active: "2026-04-04T10:30:00Z"
+
+# Operator-editable relationship fields:
+relationship: "close friend, college roommate"
+tone: "casual, warm, emoji OK"
+professional: false
+auto_approve: false
+do_not_draft: false
+agent_notes: "Alex loves hiking. Usually texts in the evening."
+model: null   # null = use default (claude-opus-4-5). Set to override per chat.
 ```
 
-Draft/outbox files add:
+The **file body** (below the `---`) holds freeform notes the operator writes by hand.
+These are included verbatim in the drafting context.
 
-```markdown
+**When drafting**, the context assembly order is:
+1. System prompt (from `agent/prompts/draft_v1.txt` — Phase 2)
+2. `context.md` frontmatter (structured facts)
+3. `context.md` body (freeform relationship notes)
+4. `history.md` (last N messages as a transcript)
+5. User turn: the new message
+
+Never put content from one chat's context into another chat's prompt. Ever.
+
 ---
-uuid: "f47ac10b-58cc-..."
-chat_id: 7
-target_identifier: "iMessage;+;+14155551212"
-created_at: "2026-04-04T10:31:00Z"
-reasoning: "User asked about Thursday meeting — confirming."
-approved: false         # set to true to move to outbox
+
+## Drafting Model
+
+Default model: **`claude-opus-4-5`** (quality over speed/cost).
+
+Per-chat override: set `model: claude-sonnet-4-5` in `context.md` to use a faster model
+for lower-stakes conversations.
+
 ---
-Yes! See you at 2pm.
+
+## Approval Workflow
+
+**Current (Phase 1–2):** File-based.
+- Drafts appear in `chats/{id}/drafts/{uuid}.md` with `approved: false`
+- Operator opens the file in any editor, reads the draft and reasoning, edits if needed,
+  sets `approved: true`
+- Next agent pass detects `approved: true`, moves the file to `outbox/`, sends it
+
+**Planned (Phase 3+):** A proper UI is coming. The file format is designed to be the
+backing store for a UI — the UI will read/write the same frontmatter fields.
+Do not add UI code to this repo. Keep the file-based approval path working always.
+
+---
+
+## Running the Agent
+
+```bash
+# Prerequisites
+cd ~/src/imsg && make build          # build imsg binary
+cd ~/src/imsg-agent
+source .venv/bin/activate            # or: source ~/.local/bin/env && uv run ...
+cp .env.example .env                 # add ANTHROPIC_API_KEY
+bash scripts/setup.sh                # verify permissions, create ~/imsg-data/
+
+# Run
+python -m agent.main                 # or: imsg-agent
+
+# Tests (no live data required)
+uv run pytest tests/ -v
 ```
 
----
+Logs go to stdout. Set `LOG_LEVEL=DEBUG` in `.env` for verbose output.
 
-## Agent Lifecycle (one pass)
-
-```
-1. WAKE        Read state.json → get cursor (last rowid)
-2. POLL        imsg rpc: watch.subscribe {since_rowid: cursor}
-               OR imsg rpc: messages.history for each active chat
-3. INGEST      For each new message:
-               - write inbox/{rowid}-{chatID}.md
-               - update chats/{chatID}/context.md
-               - append to chats/{chatID}/history.md
-4. DRAFT       For each inbox item not yet drafted:
-               - read chats/{chatID}/context.md + history.md for context
-               - call AI model with context + new message
-               - write chats/{chatID}/drafts/{uuid}.md (approved: false)
-5. APPROVE     (manual or policy-based)
-               - human edits draft, sets approved: true
-               - OR auto-approve policy moves it
-               - approved drafts move to outbox/{uuid}.md
-6. SEND        For each outbox/{uuid}.md:
-               - imsg rpc: send {chat_id, text}
-               - on success: move to sent/{uuid}.md, remove from outbox
-               - on failure: move to errors/{uuid}.md
-7. CHECKPOINT  Update state.json cursor to max seen rowid
-```
+The agent runs until SIGTERM or SIGINT (Ctrl-C). It finishes the current message,
+checkpoints the cursor, and exits cleanly.
 
 ---
 
-## Key Design Decisions (see PLAN.md for full ADRs)
+## What Phase 1 Built (Done ✅)
 
-- **Language: Python** — natural for AI agent code, rich async ecosystem, easy to iterate
-- **No direct DB access** — all reads/writes via `imsg rpc`; this project never touches `chat.db`
-- **Markdown+frontmatter files** — human-readable, git-diffable, easy to inspect/edit manually
-- **Outbox pattern** — responses are never sent without an explicit approved file in `outbox/`
-- **Cursor-based polling** — `state.json` cursor prevents duplicate processing on restart
-- **imsg rpc over CLI invocations** — one persistent subprocess, not per-message process forks
-- **No framework** — plain Python async, minimal dependencies, easy to audit
+- `rpc_client.py` — full async JSON-RPC client with `MockIMsgProcess` test double
+- `store.py` — atomic file I/O, YAML frontmatter parse/write, full directory structure
+- `inbox.py` — idempotent ingest with rowid-based deduplication
+- `main.py` — event loop, cursor checkpoint, clean signal handling
+- 56 passing tests, 0 warnings, Python 3.13
 
----
+## What's Next (Phase 2 — first ⬜ tasks in ROADMAP.md)
 
-## Configuration — `config/imsg.json`
-
-```json
-{
-  "imsg_binary": "~/src/imsg/bin/imsg",
-  "data_dir": "~/imsg-data",
-  "rpc_timeout_seconds": 30,
-  "watch_debounce_ms": 250,
-  "history_limit": 50,
-  "chat_context_messages": 20,
-  "auto_approve": false,
-  "default_service": "auto"
-}
-```
+- `agent/drafter.py` — context assembly + Claude API call + draft file write
+- System prompt v1 (`agent/prompts/draft_v1.txt`)
+- `agent/sender.py` — outbox scan, `rpc.send()`, archive to `sent/` or `errors/`
+- Approval scanner (drafts/ → outbox/ on `approved: true`)
 
 ---
 
-## macOS Permissions Required
+## Fresh Session Protocol
 
-These are required by `imsg`, not this project — but agent operators must have them:
+When you open this project in a new session:
 
-| Permission | Why | Where |
-|---|---|---|
-| Full Disk Access | Read `~/Library/Messages/chat.db` | System Settings → Privacy → Full Disk Access |
-| Automation → Messages | Send via AppleScript | System Settings → Privacy → Automation |
-
-Run `scripts/setup.sh` to verify permissions before first use.
+1. **Read this file** (done).
+2. **Read `ROADMAP.md`** — find the first `⬜` item in the current phase. That is
+   today's work unless the operator says otherwise.
+3. **Check the test suite** passes before making changes:
+   ```bash
+   uv run pytest tests/ -v
+   ```
+4. **Ask the operator** if anything is ambiguous about the next task — especially
+   anything touching the Hard Rules above.
+5. **Do not** start a new phase until all tasks in the current phase are ✅.
 
 ---
 
 ## What NOT To Do
 
 - Do NOT read `~/Library/Messages/chat.db` directly
-- Do NOT import or link against `IMsgCore` (the Swift library)
-- Do NOT modify files in `~/src/imsg/`
-- Do NOT commit anything from `~/imsg-data/` (add to .gitignore)
-- Do NOT send a message without an `outbox/{uuid}.md` file as the source of truth
-- Do NOT hardcode phone numbers, chat IDs, or personal data in source files
-- Do NOT bypass the cursor — always read `state.json` on startup
-
----
-
-## Future: Migration to DB + Queue
-
-The markdown file store is intentionally structured to map 1:1 to a relational schema:
-
-| Directory/File | Future equivalent |
-|---|---|
-| `state.json` | `agent_state` table |
-| `inbox/{rowid}-{chatID}.md` | `messages` table + `inbox_queue` |
-| `chats/{chatID}/context.md` | `chats` table |
-| `chats/{chatID}/history.md` | `messages` table (indexed by chat) |
-| `chats/{chatID}/drafts/` | `drafts` table |
-| `outbox/` | `outbox_queue` (message queue topic) |
-| `sent/` | `messages` table (status=sent) |
-
-When migrating: keep the same agent lifecycle, replace `store.py` internals only.
+- Do NOT import or link against `IMsgCore` (the Swift library in `~/src/imsg/`)
+- Do NOT modify files in `~/src/imsg/` — open a PR upstream if a capability is missing
+- Do NOT commit anything from `~/imsg-data/` — it is in `.gitignore`
+- Do NOT send a message without an `outbox/{uuid}.md` as the source of truth
+- Do NOT skip the cursor — always read `state.json` on startup
+- Do NOT let context from one chat influence drafts for another chat
+- Do NOT auto-approve sends for chats tagged `professional: true`
+- Do NOT write UI code in this repo — the approval UI is a separate future project
+- Do NOT use a model other than `claude-opus-4-5` unless the chat's `context.md`
+  explicitly sets a different `model:` field
