@@ -83,7 +83,7 @@ Before writing any draft, always read `chats/{id}/context.md` and
 │   ├── rpc_client.py      ← async JSON-RPC 2.0 client over `imsg rpc` subprocess
 │   ├── store.py           ← all ~/imsg-data/ reads and writes (atomic, frontmatter)
 │   ├── inbox.py           ← ingest new messages: dedup, write, update context + history
-│   ├── drafter.py         ← build context, call Claude API, write draft (Phase 2)
+│   ├── drafter.py         ← build context, call OpenAI Responses API, write draft (Phase 2)
 │   ├── sender.py          ← scan outbox, send via rpc, archive to sent/ (Phase 2)
 │   └── main.py            ← event loop: subscribe → ingest → draft → send → checkpoint
 │
@@ -164,7 +164,7 @@ professional: false
 auto_approve: false
 do_not_draft: false
 agent_notes: "Alex loves hiking. Usually texts in the evening."
-model: null   # null = use default (claude-opus-4-5). Set to override per chat.
+model: null   # null = use default (gpt-5.5). Set to override per chat.
 ```
 
 The **file body** (below the `---`) holds freeform notes the operator writes by hand.
@@ -183,9 +183,9 @@ Never put content from one chat's context into another chat's prompt. Ever.
 
 ## Drafting Model
 
-Default model: **`claude-opus-4-5`** (quality over speed/cost).
+Default model: **`gpt-5.5`** (quality over speed/cost).
 
-Per-chat override: set `model: claude-sonnet-4-5` in `context.md` to use a faster model
+Per-chat override: set `model:` in `context.md` to use a different OpenAI model
 for lower-stakes conversations.
 
 ---
@@ -211,7 +211,7 @@ Do not add UI code to this repo. Keep the file-based approval path working alway
 cd ~/src/imsg && make build          # build imsg binary
 cd ~/src/imsg-agent
 source .venv/bin/activate            # or: source ~/.local/bin/env && uv run ...
-cp .env.example .env                 # add ANTHROPIC_API_KEY
+cp .env.example .env                 # add OPENAI_API_KEY
 bash scripts/setup.sh                # verify permissions, create ~/imsg-data/
 
 # Run
@@ -228,20 +228,23 @@ checkpoints the cursor, and exits cleanly.
 
 ---
 
-## What Phase 1 Built (Done ✅)
+## What Phase 1–3 Built (Current ✅)
 
 - `rpc_client.py` — full async JSON-RPC client with `MockIMsgProcess` test double
 - `store.py` — atomic file I/O, YAML frontmatter parse/write, full directory structure
 - `inbox.py` — idempotent ingest with rowid-based deduplication
-- `main.py` — event loop, cursor checkpoint, clean signal handling
-- 56 passing tests, 0 warnings, Python 3.13
+- `drafter.py` — OpenAI Responses API drafting with per-chat context isolation
+- `sender.py` — approved draft scanning, outbox sending, sent/error archival
+- `nudger.py` and `summarizer.py` — file-based nudges and daily digests
+- `main.py` — event loop, cursor checkpoint, maintenance passes, clean signal handling
+- 75 passing tests, ruff clean, mypy clean
 
-## What's Next (Phase 2 — first ⬜ tasks in ROADMAP.md)
+## What's Next
 
-- `agent/drafter.py` — context assembly + Claude API call + draft file write
-- System prompt v1 (`agent/prompts/draft_v1.txt`)
-- `agent/sender.py` — outbox scan, `rpc.send()`, archive to `sent/` or `errors/`
-- Approval scanner (drafts/ → outbox/ on `approved: true`)
+- Manual end-to-end validation with a real self-message through `imsg rpc`
+- `scripts/import_contacts.py` to seed richer relationship context
+- Rate limiting and quiet hours before broader autonomous-send use
+- SQLite index (`agent/store_index.py`) once filesystem scans become limiting
 
 ---
 
@@ -273,5 +276,5 @@ When you open this project in a new session:
 - Do NOT let context from one chat influence drafts for another chat
 - Do NOT auto-approve sends for chats tagged `professional: true`
 - Do NOT write UI code in this repo — the approval UI is a separate future project
-- Do NOT use a model other than `claude-opus-4-5` unless the chat's `context.md`
+- Do NOT use a model other than `gpt-5.5` unless the chat's `context.md`
   explicitly sets a different `model:` field

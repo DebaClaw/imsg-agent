@@ -4,14 +4,11 @@ No ~/imsg-data/ is touched.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
-import pytest
 
 from agent.models import Draft, Message, OutboxItem
 from agent.store import MessageStore, _parse_frontmatter, _write_frontmatter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -25,7 +22,7 @@ def _msg(rowid: int = 1, chat_id: int = 7, text: str = "Hello") -> Message:
         guid=f"GUID-{rowid}",
         sender="+14155550101",
         text=text,
-        date=datetime(2026, 4, 4, 10, 30, 0, tzinfo=timezone.utc),
+        date=datetime(2026, 4, 4, 10, 30, 0, tzinfo=UTC),
         is_from_me=False,
         service="iMessage",
         has_attachments=False,
@@ -41,7 +38,7 @@ def _draft(
         uuid=uuid,
         chat_id=chat_id,
         target_identifier="iMessage;-;+14155550101",
-        created_at=datetime(2026, 4, 4, 10, 31, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 4, 4, 10, 31, 0, tzinfo=UTC),
         proposed_text="Yes, see you Thursday!",
         reasoning="User asked about Thursday meeting.",
         prompt_version="v1",

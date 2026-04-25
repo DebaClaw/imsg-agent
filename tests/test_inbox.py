@@ -3,10 +3,8 @@ Tests for inbox.py — mocks nothing; uses real MessageStore on tmp_path.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
-import pytest
 
 from agent.inbox import InboxProcessor
 from agent.models import Message
@@ -20,7 +18,7 @@ def _msg(rowid: int = 1, chat_id: int = 7, text: str = "Hello") -> Message:
         guid=f"GUID-{rowid}",
         sender="+14155550101",
         text=text,
-        date=datetime(2026, 4, 4, 10, 30, 0, tzinfo=timezone.utc),
+        date=datetime(2026, 4, 4, 10, 30, 0, tzinfo=UTC),
         is_from_me=False,
         service="iMessage",
         has_attachments=False,

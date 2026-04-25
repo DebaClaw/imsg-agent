@@ -21,24 +21,24 @@ for human inspection. No AI drafting yet. Proves the pipe works end-to-end.
 ### Tasks
 
 #### Setup & Config
-- ⬜ Create `pyproject.toml` with dependencies (anthropic, pyyaml, aiofiles, python-dotenv)
-- ⬜ Create `config/imsg.json` with default configuration
-- ⬜ Create `.env.example` for API keys
-- ⬜ Create `.gitignore` (exclude `~/imsg-data/`, `.env`, `__pycache__`, etc.)
-- ⬜ Write `scripts/setup.sh` — check permissions, create `~/imsg-data/` tree, verify imsg binary
+- ✅ Create `pyproject.toml` with dependencies (openai, pyyaml, aiofiles, python-dotenv)
+- ✅ Create `config/imsg.json` with default configuration
+- ✅ Create `.env.example` for API keys
+- ✅ Create `.gitignore` (exclude `~/imsg-data/`, `.env`, `__pycache__`, etc.)
+- ✅ Write `scripts/setup.sh` — check permissions, create `~/imsg-data/` tree, verify imsg binary
 
 #### Core Modules
-- ⬜ `agent/models.py` — dataclasses: `Message`, `Chat`, `ChatInfo`, `Draft`, `OutboxItem`
-- ⬜ `agent/rpc_client.py` — subprocess manager, JSON-RPC send/receive, async iterator for notifications
-- ⬜ `agent/store.py` — all `~/imsg-data/` I/O: read/write inbox, context, history, state.json, outbox, sent, errors
-- ⬜ `agent/inbox.py` — consume messages from rpc_client, write to store, dedup by rowid
-- ⬜ `agent/main.py` — event loop: init → subscribe → ingest loop → checkpoint → signal handling
+- ✅ `agent/models.py` — dataclasses: `Message`, `Chat`, `Draft`, `OutboxItem`
+- ✅ `agent/rpc_client.py` — subprocess manager, JSON-RPC send/receive, async iterator for notifications
+- ✅ `agent/store.py` — all `~/imsg-data/` I/O: read/write inbox, context, history, state.json, outbox, sent, errors
+- ✅ `agent/inbox.py` — consume messages from rpc_client, write to store, dedup by rowid
+- ✅ `agent/main.py` — event loop: init → subscribe → ingest loop → checkpoint → signal handling
 
 #### Tests
-- ⬜ `tests/fixtures/` — sample `chats.list` and `watch.subscribe` notification payloads
-- ⬜ `tests/test_rpc_client.py` — mock subprocess I/O, test request/response lifecycle
-- ⬜ `tests/test_store.py` — temp dir, test all read/write/parse/atomic-write operations
-- ⬜ `tests/test_inbox.py` — test dedup, context update, history rolling window
+- ✅ `tests/fixtures/` — sample `chats.list` and `watch.subscribe` notification payloads
+- ✅ `tests/test_rpc_client.py` — mock subprocess I/O, test request/response lifecycle
+- ✅ `tests/test_store.py` — temp dir, test all read/write/parse/atomic-write operations
+- ✅ `tests/test_inbox.py` — test dedup, context update, history rolling window
 
 #### Validation
 - ⬜ Manual end-to-end test: send message to self, verify inbox file created
@@ -50,7 +50,7 @@ for human inspection. No AI drafting yet. Proves the pipe works end-to-end.
 ## Phase 2 — Drafting: AI Response Proposals
 
 **Goal:** For each inbox message, the agent reads chat context and proposes a response using
-Claude. Drafts are written to `chats/{chatID}/drafts/` and held for approval.
+the OpenAI Responses API. Drafts are written to `chats/{chatID}/drafts/` and held for approval.
 
 **Exit criteria:**
 - Within 5 seconds of a new inbox file, a draft file appears in `chats/{chatID}/drafts/`
@@ -61,22 +61,22 @@ Claude. Drafts are written to `chats/{chatID}/drafts/` and held for approval.
 ### Tasks
 
 #### Drafting
-- ⬜ `agent/drafter.py` — build context from history.md + context.md, call Claude API, write draft
-- ⬜ System prompt v1 — base prompt for iMessage response drafting
-- ⬜ Per-chat prompt overrides — read from `chats/{chatID}/context.md` field `agent_notes`
-- ⬜ Draft filename convention: `{timestamp}-{rowid}.md` for natural sort order
-- ⬜ `tests/test_drafter.py` — mock API, test context assembly, test draft format
+- ✅ `agent/drafter.py` — build context from history.md + context.md, call OpenAI Responses API, write draft
+- ✅ System prompt v1 — base prompt for iMessage response drafting
+- ✅ Per-chat prompt context — read relationship, tone, and `agent_notes` from `context.md`
+- ✅ Draft filename convention: `{timestamp}-{rowid}.md` for natural sort order
+- ✅ `tests/test_drafter.py` — mock API, test context assembly, test draft format
 
 #### Approval & Send
-- ⬜ `agent/sender.py` — scan outbox, call rpc_client.send(), archive to sent/ or errors/
-- ⬜ Approval watcher: scan drafts/ for `approved: true`, move to outbox/
-- ⬜ Attachment path allowlist enforcement in sender.py
-- ⬜ `tests/test_sender.py` — mock rpc_client, test success/failure/archive paths
+- ✅ `agent/sender.py` — scan outbox, call rpc_client.send(), archive to sent/ or errors/
+- ✅ Approval watcher: scan drafts/ for `approved: true`, move to outbox/
+- ✅ Attachment path allowlist enforcement in sender.py
+- ✅ `tests/test_sender.py` — mock rpc_client, test success/failure/archive paths
 
 #### Safety & Config
-- ⬜ `auto_approve: false` default enforced — drafts never auto-move without explicit config
-- ⬜ Per-chat `do_not_draft: true` flag in context.md — skip drafting for that chat
-- ⬜ Max inbox age filter — don't draft responses to messages older than N hours
+- ✅ `auto_approve: false` default enforced — drafts never auto-move without explicit config
+- ✅ Per-chat `do_not_draft: true` flag in context.md — skip drafting for that chat
+- ✅ Max inbox age filter — don't draft responses to messages older than N hours
 
 #### Validation
 - ⬜ Manual end-to-end: receive message → draft appears → set approved → message sent → archived
@@ -98,24 +98,24 @@ configurable policies (auto-approve for certain chats, different tones per conta
 ### Tasks
 
 #### Relationship Context
-- ⬜ `chats/{chatID}/context.md` schema v2 — add `relationship`, `tone`, `agent_notes`, `do_not_draft`
-- ⬜ Drafter reads and uses relationship context in system prompt
+- ✅ `chats/{chatID}/context.md` schema v2 — add `relationship`, `tone`, `agent_notes`, `do_not_draft`
+- ✅ Drafter reads and uses relationship context in system prompt
 - ⬜ `scripts/import_contacts.py` — seed context.md files from existing chat history
 
 #### Policies
 - ⬜ `config/policies.json` — per-chat-id or per-participant rules
-- ⬜ Auto-approve policy engine in `sender.py`
+- ✅ Auto-approve policy engine for opted-in non-professional 1:1 chats
 - ⬜ Rate limiting: max N sends per chat per hour
 - ⬜ Quiet hours: do not send between configurable hours
 
 #### Summaries & Proactive Nudges
-- ⬜ `agent/summarizer.py` — daily summary of conversations, unanswered messages
-- ⬜ `agent/nudger.py` — detect "no reply in N days", write nudge to a special `nudges/` dir
-- ⬜ Weekly digest output to `~/imsg-data/digests/{date}.md`
+- ✅ `agent/summarizer.py` — daily summary of conversations
+- ✅ `agent/nudger.py` — detect "no reply in N days", write nudge to a special `nudges/` dir
+- ⬜ Weekly digest scheduling/output policy
 
 #### Group Chat Handling
-- ⬜ Detect group chats (`;+;` in identifier) and adjust drafting strategy
-- ⬜ Default to `do_not_draft: true` for group chats until operator opts in
+- ✅ Detect group chats (`;+;` in identifier or multiple participants) and adjust drafting strategy
+- ✅ Default to `do_not_draft: true` for group chats until operator opts in
 
 ---
 
@@ -165,7 +165,7 @@ concurrent agents, and reliability guarantees.
 ## Ongoing / Cross-cutting
 
 - ⬜ CI: GitHub Actions running `pytest` on every push (no live DB, fixtures only)
-- ⬜ Linting: `ruff` + `mypy --strict`
+- ✅ Linting: `ruff` + `mypy --strict`
 - ⬜ `scripts/health_check.sh` — verify imsg binary, permissions, data dir, rpc connectivity
 - ⬜ Changelog maintenance
 - ⬜ Prompt versioning: track system prompt versions alongside draft files so old drafts are

@@ -189,12 +189,12 @@ messages). The AI drafter receives both as context.
 - The agent lifecycle is simple and well-defined: poll → ingest → draft → approve → send.
   A framework adds abstraction over a problem that doesn't need it yet.
 - Frameworks add transitive dependencies that change frequently and introduce security surface.
-- The Claude API (or any LLM API) is called directly in `drafter.py` — one HTTP call per draft.
+- The OpenAI Responses API (or any LLM API) is called through `drafter.py` — one HTTP call per draft.
 - If orchestration complexity grows (multi-agent, tool use, etc.), this is the point to evaluate
   frameworks — not before.
 
 **Dependencies (target minimal set):**
-- `anthropic` — Claude API SDK for drafting
+- `openai` — OpenAI API SDK for drafting
 - `pyyaml` — frontmatter parsing
 - `aiofiles` — async file I/O
 - `python-dotenv` — config from `.env`
@@ -226,7 +226,7 @@ messages). The AI drafter receives both as context.
 ### `drafter.py`
 - Reads unprocessed inbox files
 - Builds context: `context.md` + `history.md` for the chat
-- Calls Claude API with a system prompt + context + new message
+- Calls the OpenAI Responses API with a system prompt + context + new message
 - Writes `chats/{chatID}/drafts/{uuid}.md` with `approved: false`
 - **The only module that calls an external AI API**
 
@@ -262,7 +262,7 @@ inbox.py ───────────────────────�
 drafter.py
   │
   │ read context.md + history.md
-  │ call Claude API
+  │ call OpenAI Responses API
   │
   ▼
 store.py ──────► chats/{chatID}/drafts/{uuid}.md  (approved: false)
@@ -295,7 +295,7 @@ decide *what* to send — it only executes what's already been approved.
 Files outside this directory are rejected with a log entry to `errors/`.
 
 ### Threat: Prompt injection via received message content
-**Mitigation:** Received message text is passed to Claude API as user-turn content, clearly
+**Mitigation:** Received message text is passed to the model as user-turn content, clearly
 separated from the system prompt. The system prompt instructs the model that message content is
 untrusted user input. Draft output is reviewed before send. (Phase 2: add explicit injection
 resistance patterns.)
@@ -317,7 +317,7 @@ Even if cursor is wrong, the same message won't generate a second inbox file or 
 - `test_rpc_client.py` — mock subprocess, test request/response parsing
 - `test_store.py` — temp directory, test all read/write/parse operations
 - `test_inbox.py` — mock rpc_client and store, test dedup and context update logic
-- `test_drafter.py` — mock Claude API, test context assembly and draft file format
+- `test_drafter.py` — mock drafting client, test context assembly and draft file format
 
 ### Integration tests (requires imsg binary + Full Disk Access)
 - `tests/integration/` — marked with `@pytest.mark.integration`
@@ -326,19 +326,19 @@ Even if cursor is wrong, the same message won't generate a second inbox file or 
 
 ---
 
-## Phase 1 → Phase 3 Migration Path
+## Storage Migration Path
 
 ### Phase 1 (current): Markdown files
 - `store.py` reads/writes `~/imsg-data/`
 - All queries are filesystem traversals
 
-### Phase 2: SQLite index
+### Phase 4: SQLite index
 - Add `store_index.py`: maintains a SQLite index of frontmatter metadata
 - `store.py` API unchanged; queries go through index
 - Files remain the source of truth; index is a projection
 - Zero change to `inbox.py`, `drafter.py`, `sender.py`
 
-### Phase 3: Full DB + Queue
+### Phase 5: Full DB + Queue
 - Replace `store.py` with a DB-backed implementation (PostgreSQL or SQLite)
 - Replace `outbox/` with a proper message queue (Redis, SQLite queue, or a cloud queue)
 - The agent lifecycle (`main.py`) and all modules above `store.py` are unchanged

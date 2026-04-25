@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -38,12 +38,12 @@ _HISTORY_SEPARATOR = "<!-- rowid:"
 
 
 def _fmt_dt(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _parse_dt(s: str | None) -> datetime:
     if not s:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
@@ -87,6 +87,10 @@ class MessageStore:
     def __init__(self, data_dir: Path) -> None:
         self._root = Path(data_dir).expanduser().resolve()
         self._root.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def data_dir(self) -> Path:
+        return self._root
 
     # ------------------------------------------------------------------
     # State / Cursor
@@ -181,17 +185,32 @@ class MessageStore:
     def _chat_dir(self, chat_id: int) -> Path:
         return self._root / "chats" / str(chat_id)
 
+    def list_chat_ids(self) -> list[int]:
+        """Return known chat ids from chats/ directories."""
+        chats_dir = self._root / "chats"
+        if not chats_dir.exists():
+            return []
+        ids = []
+        for path in chats_dir.iterdir():
+            if path.is_dir() and path.name.isdigit():
+                ids.append(int(path.name))
+        return sorted(ids)
+
     def read_chat_context(self, chat_id: int) -> dict[str, Any]:
         """Return parsed frontmatter from chats/{id}/context.md, or {} if absent."""
+        meta, _ = self.read_chat_context_document(chat_id)
+        return meta
+
+    def read_chat_context_document(self, chat_id: int) -> tuple[dict[str, Any], str]:
+        """Return (frontmatter, body) from chats/{id}/context.md, or ({}, "") if absent."""
         path = self._chat_dir(chat_id) / "context.md"
         if not path.exists():
-            return {}
+            return {}, ""
         try:
-            meta, _ = _parse_frontmatter(path.read_text(encoding="utf-8"))
-            return meta
+            return _parse_frontmatter(path.read_text(encoding="utf-8"))
         except Exception as exc:
             logger.warning("Failed to read chat context for %d: %s", chat_id, exc)
-            return {}
+            return {}, ""
 
     def write_chat_context(self, chat_id: int, context: dict[str, Any]) -> None:
         """
@@ -263,6 +282,10 @@ class MessageStore:
         }
         if draft.source_rowid is not None:
             meta["source_rowid"] = draft.source_rowid
+        if draft.model:
+            meta["model"] = draft.model
+        if draft.auto_approved:
+            meta["auto_approved"] = True
         _atomic_write(
             self._chat_dir(draft.chat_id) / "drafts" / f"{draft.uuid}.md",
             _write_frontmatter(meta, draft.proposed_text),
@@ -296,18 +319,59 @@ class MessageStore:
                 reasoning=meta.get("reasoning") or "",
                 prompt_version=meta.get("prompt_version") or "v1",
                 approved=bool(meta.get("approved")),
-                source_rowid=meta.get("source_rowid"),
+                source_rowid=int(meta["source_rowid"]) if meta.get("source_rowid") else None,
+                model=meta.get("model") or None,
+                auto_approved=bool(meta.get("auto_approved")),
             )
         except Exception as exc:
             logger.warning("Failed to parse draft %s: %s", path, exc)
             return None
 
+    def draft_exists_for_source(self, chat_id: int, source_rowid: int) -> bool:
+        """Return True if any draft/outbox/archive already references source_rowid."""
+        search_roots = [
+            self._chat_dir(chat_id) / "drafts",
+            self._root / "outbox",
+            self._root / "sent",
+            self._root / "errors",
+        ]
+        for root in search_roots:
+            if not root.exists():
+                continue
+            for path in root.glob("*.md"):
+                try:
+                    meta, _ = _parse_frontmatter(path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if int(meta.get("chat_id") or -1) != chat_id:
+                    continue
+                if (
+                    meta.get("source_rowid") is not None
+                    and int(meta["source_rowid"]) == source_rowid
+                ):
+                    return True
+        return False
+
     def move_draft_to_outbox(self, draft: Draft) -> None:
         """Move an approved draft from chats/{id}/drafts/ to outbox/."""
         src = self._chat_dir(draft.chat_id) / "drafts" / f"{draft.uuid}.md"
         dst = self._root / "outbox" / f"{draft.uuid}.md"
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        src.rename(dst)
+        meta: dict[str, Any] = {
+            "uuid": draft.uuid,
+            "chat_id": draft.chat_id,
+            "target_identifier": draft.target_identifier,
+            "created_at": _fmt_dt(draft.created_at),
+            "source_draft_uuid": draft.uuid,
+            "reasoning": draft.reasoning,
+            "auto_approved": draft.auto_approved,
+        }
+        if draft.source_rowid is not None:
+            meta["source_rowid"] = draft.source_rowid
+        if draft.model:
+            meta["model"] = draft.model
+        _atomic_write(dst, _write_frontmatter(meta, draft.proposed_text))
+        if src.exists():
+            src.unlink()
 
     # ------------------------------------------------------------------
     # Outbox / Sent / Errors
@@ -332,6 +396,10 @@ class MessageStore:
                 attachment_path=meta.get("attachment_path") or None,
                 created_at=_parse_dt(meta.get("created_at")),
                 source_draft_uuid=meta.get("source_draft_uuid") or None,
+                source_rowid=int(meta["source_rowid"]) if meta.get("source_rowid") else None,
+                reasoning=meta.get("reasoning") or "",
+                model=meta.get("model") or None,
+                auto_approved=bool(meta.get("auto_approved")),
             )
         except Exception as exc:
             logger.warning("Failed to parse outbox item %s: %s", path, exc)
@@ -342,10 +410,14 @@ class MessageStore:
         meta: dict[str, Any] = {
             "uuid": item.uuid,
             "chat_id": item.chat_id,
-            "sent_at": _fmt_dt(sent_at or datetime.now(timezone.utc)),
+            "sent_at": _fmt_dt(sent_at or datetime.now(UTC)),
+            "reasoning": item.reasoning,
+            "source_draft_uuid": item.source_draft_uuid or item.uuid,
         }
-        if item.source_draft_uuid:
-            meta["source_draft_uuid"] = item.source_draft_uuid
+        if item.source_rowid is not None:
+            meta["source_rowid"] = item.source_rowid
+        if item.model:
+            meta["model"] = item.model
         dst = self._root / "sent" / f"{item.uuid}.md"
         dst.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(dst, _write_frontmatter(meta, item.text))
@@ -359,11 +431,79 @@ class MessageStore:
             "uuid": item.uuid,
             "chat_id": item.chat_id,
             "error": reason,
-            "failed_at": _fmt_dt(datetime.now(timezone.utc)),
+            "failed_at": _fmt_dt(datetime.now(UTC)),
+            "reasoning": item.reasoning,
         }
+        if item.source_draft_uuid:
+            meta["source_draft_uuid"] = item.source_draft_uuid
+        if item.source_rowid is not None:
+            meta["source_rowid"] = item.source_rowid
+        if item.model:
+            meta["model"] = item.model
         dst = self._root / "errors" / f"{item.uuid}.md"
         dst.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(dst, _write_frontmatter(meta, item.text))
         src = self._root / "outbox" / f"{item.uuid}.md"
         if src.exists():
             src.unlink()
+
+    def move_bad_outbox_to_errors(self, path: Path, reason: str) -> None:
+        """Move an unreadable outbox file to errors/ without attempting a send."""
+        meta = {
+            "uuid": path.stem,
+            "chat_id": None,
+            "error": reason,
+            "failed_at": _fmt_dt(datetime.now(UTC)),
+        }
+        dst = self._root / "errors" / f"{path.stem}.md"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        body = path.read_text(encoding="utf-8") if path.exists() else ""
+        _atomic_write(dst, _write_frontmatter(meta, body))
+        if path.exists():
+            path.unlink()
+
+    def move_sent_to_errors(self, uuid: str, reason: str) -> None:
+        """Move a prewritten sent archive to errors if the RPC send fails."""
+        sent_path = self._root / "sent" / f"{uuid}.md"
+        if not sent_path.exists():
+            return
+        meta, body = _parse_frontmatter(sent_path.read_text(encoding="utf-8"))
+        meta["error"] = reason
+        meta["failed_at"] = _fmt_dt(datetime.now(UTC))
+        meta.pop("sent_at", None)
+        dst = self._root / "errors" / f"{uuid}.md"
+        _atomic_write(dst, _write_frontmatter(meta, body))
+        sent_path.unlink()
+
+    def discard_outbox_item(self, uuid: str) -> None:
+        path = self._root / "outbox" / f"{uuid}.md"
+        if path.exists():
+            path.unlink()
+
+    # ------------------------------------------------------------------
+    # Nudges / Digests
+    # ------------------------------------------------------------------
+
+    def write_nudge(
+        self,
+        *,
+        chat_id: int,
+        nudge_date: str,
+        reason: str,
+        body: str,
+    ) -> Path:
+        """Write a proactive nudge notice for the operator."""
+        path = self._root / "nudges" / f"{nudge_date}-{chat_id}.md"
+        meta = {"chat_id": chat_id, "date": nudge_date, "reason": reason}
+        _atomic_write(path, _write_frontmatter(meta, body))
+        return path
+
+    def nudge_exists(self, *, chat_id: int, nudge_date: str) -> bool:
+        return (self._root / "nudges" / f"{nudge_date}-{chat_id}.md").exists()
+
+    def write_digest(self, *, digest_date: str, body: str) -> Path:
+        """Write a conversation digest markdown file."""
+        path = self._root / "digests" / f"{digest_date}.md"
+        meta = {"date": digest_date}
+        _atomic_write(path, _write_frontmatter(meta, body))
+        return path

@@ -23,22 +23,28 @@ class Config:
     auto_approve: bool
     default_service: str
     max_inbox_age_hours: int
+    openai_api_key: str | None
+    draft_model: str
+    maintenance_interval_seconds: float
+    nudge_after_hours: int
 
 
 def load_config(path: Path | None = None) -> Config:
     """Load config from JSON file, with environment variable overrides."""
     if path is None:
         env_path = os.environ.get("IMSG_AGENT_CONFIG")
-        if env_path:
-            path = Path(env_path)
-        else:
-            path = Path(__file__).parent.parent / "config" / "imsg.json"
+        path = (
+            Path(env_path)
+            if env_path
+            else Path(__file__).parent.parent / "config" / "imsg.json"
+        )
 
     with open(path) as f:
         data = json.load(f)
 
     data_dir_str = os.environ.get("IMSG_DATA_DIR") or data.get("data_dir", "~/imsg-data")
     binary_str = os.environ.get("IMSG_BINARY") or data.get("imsg_binary", "~/src/imsg/bin/imsg")
+    model = os.environ.get("IMSG_DRAFT_MODEL") or data.get("draft_model", "gpt-5.5")
 
     return Config(
         imsg_binary=Path(binary_str).expanduser(),
@@ -50,4 +56,8 @@ def load_config(path: Path | None = None) -> Config:
         auto_approve=bool(data.get("auto_approve", False)),
         default_service=str(data.get("default_service", "auto")),
         max_inbox_age_hours=int(data.get("max_inbox_age_hours", 48)),
+        openai_api_key=os.environ.get("OPENAI_API_KEY"),
+        draft_model=str(model),
+        maintenance_interval_seconds=float(data.get("maintenance_interval_seconds", 5.0)),
+        nudge_after_hours=int(data.get("nudge_after_hours", 72)),
     )

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -17,8 +16,8 @@ from agent.rpc_client import (
     IMsgRPCClient,
     IMsgRPCConnectionError,
     IMsgRPCError,
-    _parse_message,
     _parse_chat,
+    _parse_message,
 )
 
 # ---------------------------------------------------------------------------
@@ -145,12 +144,12 @@ class MockIMsgProcess:
     def add_handler(self, fn: Any) -> None:
         self._handlers.append(fn)
 
-    def send(self, obj: dict) -> None:
+    def send(self, obj: dict[str, Any]) -> None:
         """Enqueue a JSON-RPC object to be returned by the next readline()."""
         self._outbox.put_nowait(json.dumps(obj).encode() + b"\n")
 
     class _Stdin:
-        def __init__(self, proc: "MockIMsgProcess") -> None:
+        def __init__(self, proc: MockIMsgProcess) -> None:
             self._proc = proc
 
         def write(self, data: bytes) -> None:
@@ -168,7 +167,7 @@ class MockIMsgProcess:
             pass
 
     class _Stdout:
-        def __init__(self, proc: "MockIMsgProcess") -> None:
+        def __init__(self, proc: MockIMsgProcess) -> None:
             self._proc = proc
 
         async def readline(self) -> bytes:
@@ -176,7 +175,7 @@ class MockIMsgProcess:
 
 
 def _make_client_with_responses(
-    *responses: dict,
+    *responses: dict[str, Any],
 ) -> tuple[IMsgRPCClient, MagicMock]:
     """
     Build a client whose mock stdout returns `responses` as JSON lines then EOF.
@@ -209,11 +208,15 @@ def _make_client_with_responses(
     return client, mock_process
 
 
-def _simple_client(method: str, result: dict | None = None, error: dict | None = None) -> IMsgRPCClient:
+def _simple_client(
+    method: str,
+    result: dict[str, Any] | None = None,
+    error: dict[str, Any] | None = None,
+) -> IMsgRPCClient:
     """Create a client backed by MockIMsgProcess that returns a fixed result/error for `method`."""
     process = MockIMsgProcess()
 
-    def handler(req: dict) -> None:
+    def handler(req: dict[str, Any]) -> None:
         if req.get("method") == method:
             if error is not None:
                 process.send({"jsonrpc": "2.0", "id": req.get("id"), "error": error})
@@ -264,7 +267,7 @@ async def test_multiple_sequential_requests() -> None:
     """Two back-to-back requests should each get their own response via distinct IDs."""
     process = MockIMsgProcess()
 
-    def handler(req: dict) -> None:
+    def handler(req: dict[str, Any]) -> None:
         method, req_id = req.get("method"), req.get("id")
         if method == "chats.list":
             process.send({"jsonrpc": "2.0", "id": req_id, "result": {"chats": [SAMPLE_CHAT]}})
@@ -291,7 +294,7 @@ async def test_subscribe_yields_messages_from_notifications() -> None:
     """subscribe() should yield Messages delivered as push notifications."""
     process = MockIMsgProcess()
 
-    def handler(req: dict) -> None:
+    def handler(req: dict[str, Any]) -> None:
         method, req_id = req.get("method"), req.get("id")
         if method == "watch.subscribe":
             process.send({"jsonrpc": "2.0", "id": req_id, "result": {"subscription": 42}})

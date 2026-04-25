@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 
 @dataclass
@@ -56,11 +55,11 @@ class Message:
     has_attachments: bool
     attachments: list[Attachment] = field(default_factory=list)
     reactions: list[Reaction] = field(default_factory=list)
-    reply_to_guid: Optional[str] = None
-    thread_originator_guid: Optional[str] = None
-    destination_caller_id: Optional[str] = None
+    reply_to_guid: str | None = None
+    thread_originator_guid: str | None = None
+    destination_caller_id: str | None = None
     is_reaction: bool = False
-    reaction_type: Optional[str] = None
+    reaction_type: str | None = None
 
 
 @dataclass
@@ -74,7 +73,9 @@ class Draft:
     prompt_version: str
     approved: bool = False
     # rowid of the inbox message that triggered this draft
-    source_rowid: Optional[int] = None
+    source_rowid: int | None = None
+    model: str | None = None
+    auto_approved: bool = False
 
 
 @dataclass
@@ -83,9 +84,13 @@ class OutboxItem:
     chat_id: int
     target_identifier: str
     text: str
-    attachment_path: Optional[str]  # must be under ~/imsg-data/outbox/attachments/ only
+    attachment_path: str | None  # must be under ~/imsg-data/outbox/attachments/ only
     created_at: datetime
-    source_draft_uuid: Optional[str] = None
+    source_draft_uuid: str | None = None
+    source_rowid: int | None = None
+    reasoning: str = ""
+    model: str | None = None
+    auto_approved: bool = False
 
 
 @dataclass
@@ -94,7 +99,9 @@ class SentItem:
     chat_id: int
     text: str
     sent_at: datetime
-    source_draft_uuid: Optional[str] = None
+    source_draft_uuid: str | None = None
+    source_rowid: int | None = None
+    reasoning: str = ""
 
 
 @dataclass

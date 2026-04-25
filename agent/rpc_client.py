@@ -14,7 +14,8 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +50,7 @@ class IMsgRPCConnectionError(Exception):
 
 def _dt(s: str | None) -> datetime:
     if not s:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
@@ -159,22 +160,18 @@ class IMsgRPCClient:
     async def stop(self) -> None:
         """Gracefully stop the subprocess and reader task."""
         if self._process and self._process.stdin:
-            try:
+            with suppress(Exception):
                 self._process.stdin.close()
-            except Exception:
-                pass
         if self._process:
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._process.kill()
                 await self._process.wait()
         if self._reader_task and not self._reader_task.done():
             self._reader_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._reader_task
-            except asyncio.CancelledError:
-                pass
         logger.info("imsg rpc stopped")
 
     # ------------------------------------------------------------------
@@ -261,9 +258,11 @@ class IMsgRPCClient:
 
         try:
             return await asyncio.wait_for(asyncio.shield(future), timeout=self._timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError as exc:
             self._pending.pop(req_id, None)
-            raise IMsgRPCConnectionError(f"Request timed out after {self._timeout}s: {method}")
+            raise IMsgRPCConnectionError(
+                f"Request timed out after {self._timeout}s: {method}"
+            ) from exc
 
     # ------------------------------------------------------------------
     # Public API
