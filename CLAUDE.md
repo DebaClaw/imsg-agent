@@ -122,7 +122,7 @@ This project talks to iMessage exclusively through the `imsg rpc` subprocess.
 
 | Detail | Value |
 |---|---|
-| Binary | `~/src/imsg/bin/imsg` (built with `cd ~/src/imsg && make build`) |
+| Binary | `~/src/imsg/bin/imsg` by default; override with `IMSG_BINARY` |
 | Interface | JSON-RPC 2.0 over stdin/stdout, one persistent subprocess |
 | Client | `agent/rpc_client.py` → `IMsgRPCClient` |
 | Protocol docs | `~/src/imsg/docs/rpc.md` |
@@ -208,10 +208,10 @@ Do not add UI code to this repo. Keep the file-based approval path working alway
 
 ```bash
 # Prerequisites
-cd ~/src/imsg && make build          # build imsg binary
 cd ~/src/imsg-agent
 uv sync
 cp .env.example .env                 # add OPENAI_API_KEY
+test -x "${IMSG_BINARY:-$HOME/src/imsg/bin/imsg}"
 uv run bash scripts/setup.sh         # verify permissions, create ~/imsg-data/
 
 # Run

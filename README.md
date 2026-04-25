@@ -55,16 +55,20 @@ tests/            Unit tests with fixtures, no live Messages database required
 
 - macOS with Messages configured.
 - `uv` for Python dependency management and command execution.
-- The `imsg` bridge built at `~/src/imsg/bin/imsg`.
+- A working `imsg` executable. By default this project looks for
+  `~/src/imsg/bin/imsg`; set `IMSG_BINARY` if your executable is elsewhere.
 - Full Disk Access granted to the terminal app that runs `imsg-agent`.
 - An OpenAI API key for drafting.
 
-Build `imsg` first if needed:
+Before continuing, verify the configured executable path:
 
 ```bash
-cd ~/src/imsg
-make build
+test -x "${IMSG_BINARY:-$HOME/src/imsg/bin/imsg}"
 ```
+
+If that command fails, install or build `imsg` in its own repository first, then rerun
+the check. `scripts/setup.sh` performs the same validation and stops if the binary is
+missing.
 
 ### 2. Install dependencies
 

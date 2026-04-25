@@ -12,7 +12,7 @@ echo ""
 echo "→ Checking imsg binary..."
 if [ ! -f "$IMSG_BINARY" ]; then
   echo "  ✗ imsg binary not found at $IMSG_BINARY"
-  echo "    Run: cd ~/src/imsg && make build"
+  echo "    Install or build imsg first, or set IMSG_BINARY to a working executable."
   exit 1
 fi
 echo "  ✓ imsg binary: $IMSG_BINARY"
