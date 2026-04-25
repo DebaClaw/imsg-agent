@@ -30,7 +30,7 @@ The system must be:
                          ▼
 ┌─────────────────────────────────────────────────────────┐
 │                    imsg binary                           │
-│          (~/src/imsg/bin/imsg)                          │
+│          (`imsg` from PATH, or IMSG_BINARY)             │
 │                                                         │
 │  imsg rpc  ←── JSON-RPC 2.0 over stdin/stdout ──►       │
 └────────────────────────┬────────────────────────────────┘

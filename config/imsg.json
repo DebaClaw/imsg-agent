@@ -1,5 +1,5 @@
 {
-  "imsg_binary": "~/src/imsg/bin/imsg",
+  "imsg_binary": "imsg",
   "data_dir": "~/imsg-data",
   "rpc_timeout_seconds": 30,
   "watch_debounce_ms": 250,

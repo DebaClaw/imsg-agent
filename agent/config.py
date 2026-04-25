@@ -43,7 +43,7 @@ def load_config(path: Path | None = None) -> Config:
         data = json.load(f)
 
     data_dir_str = os.environ.get("IMSG_DATA_DIR") or data.get("data_dir", "~/imsg-data")
-    binary_str = os.environ.get("IMSG_BINARY") or data.get("imsg_binary", "~/src/imsg/bin/imsg")
+    binary_str = os.environ.get("IMSG_BINARY") or data.get("imsg_binary", "imsg")
     model = os.environ.get("IMSG_DRAFT_MODEL") or data.get("draft_model", "gpt-5.5")
 
     return Config(

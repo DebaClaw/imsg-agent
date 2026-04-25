@@ -2,17 +2,34 @@
 # setup.sh — Verify environment and create ~/imsg-data/ directory tree.
 set -euo pipefail
 
-IMSG_BINARY="${IMSG_BINARY:-$HOME/src/imsg/bin/imsg}"
 DATA_DIR="${IMSG_DATA_DIR:-$HOME/imsg-data}"
+
+resolve_imsg_binary() {
+  if [ -n "${IMSG_BINARY:-}" ]; then
+    if command -v "$IMSG_BINARY" >/dev/null 2>&1; then
+      command -v "$IMSG_BINARY"
+      return 0
+    fi
+    if [ -x "$IMSG_BINARY" ]; then
+      printf '%s\n' "$IMSG_BINARY"
+      return 0
+    fi
+    return 1
+  fi
+
+  command -v imsg
+}
+
+IMSG_BINARY="$(resolve_imsg_binary || true)"
 
 echo "=== imsg-agent setup ==="
 echo ""
 
 # Check imsg binary
 echo "→ Checking imsg binary..."
-if [ ! -f "$IMSG_BINARY" ]; then
-  echo "  ✗ imsg binary not found at $IMSG_BINARY"
-  echo "    Install or build imsg first, or set IMSG_BINARY to a working executable."
+if [ -z "$IMSG_BINARY" ]; then
+  echo "  ✗ imsg executable not found on PATH."
+  echo "    Install imsg so 'command -v imsg' works, or set IMSG_BINARY=/path/to/imsg."
   exit 1
 fi
 echo "  ✓ imsg binary: $IMSG_BINARY"
