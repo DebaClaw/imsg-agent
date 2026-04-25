@@ -19,6 +19,7 @@ class Chat:
     last_message_at: datetime
     guid: str = ""
     participants: list[str] = field(default_factory=list)
+    is_group: bool = False
 
 
 @dataclass
@@ -60,6 +61,11 @@ class Message:
     destination_caller_id: str | None = None
     is_reaction: bool = False
     reaction_type: str | None = None
+    chat_identifier: str = ""
+    chat_guid: str = ""
+    chat_name: str = ""
+    participants: list[str] = field(default_factory=list)
+    is_group: bool = False
 
 
 @dataclass

@@ -85,6 +85,9 @@ Before writing any draft, always read `chats/{id}/context.md` and
 │   ├── inbox.py           ← ingest new messages: dedup, write, update context + history
 │   ├── drafter.py         ← build context, call OpenAI Responses API, write draft (Phase 2)
 │   ├── sender.py          ← scan outbox, send via rpc, archive to sent/ (Phase 2)
+│   ├── archive_store.py   ← SQLite archive of chats/messages/attachments
+│   ├── archiver.py        ← no-GenAI backfill + monitor
+│   ├── archive_main.py    ← `imsg-archive` CLI
 │   └── main.py            ← event loop: subscribe → ingest → draft → send → checkpoint
 │
 ├── config/
@@ -112,6 +115,7 @@ Before writing any draft, always read `chats/{id}/context.md` and
 ├── errors/                ← {uuid}.md — failed sends with reason
 ├── nudges/                ← proactive "you haven't replied to X" notices
 └── digests/               ← {date}.md — conversation summaries
+└── imessage.sqlite        ← optional local SQLite archive for `imsg-archive`
 ```
 
 ---
@@ -216,6 +220,9 @@ uv run bash scripts/setup.sh         # verify permissions, create ~/imsg-data/
 
 # Run
 uv run python -m agent.main          # or: uv run imsg-agent
+
+# No-GenAI archive backfill + monitor
+uv run imsg-archive run
 
 # Tests (no live data required)
 uv run pytest tests/ -v

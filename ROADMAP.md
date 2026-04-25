@@ -124,6 +124,10 @@ configurable policies (auto-approve for certain chats, different tones per conta
 **Goal:** Add a queryable index over the markdown data so the agent can answer questions like
 "what did I last say to person X" or "find all unanswered messages."
 
+Note: `agent/archive_store.py` now provides a no-GenAI SQLite archive for chats, messages,
+attachment metadata, and reactions. Phase 4 remains about adding richer query APIs and
+rebuild/index tooling on top of persistent local data.
+
 **Exit criteria:**
 - `store_index.py` maintains a SQLite DB in `~/imsg-data/index.db`
 - Index is rebuilt from markdown files in <5 seconds for 10k messages
@@ -132,10 +136,11 @@ configurable policies (auto-approve for certain chats, different tones per conta
 
 ### Tasks
 
-- ⬜ `agent/store_index.py` — schema, build, and query API
+- ✅ `agent/archive_store.py` — schema for chats, messages, attachments, reactions, cursor
+- ⬜ Query API for unanswered messages, participants, and chat activity
 - ⬜ `scripts/rebuild_index.py` — full rebuild from markdown files
-- ⬜ Incremental index update on each store write
-- ⬜ Migration: existing `~/imsg-data/` → index.db
+- ✅ Incremental archive update from `imsg-archive monitor`
+- ✅ Backfill from `imsg rpc messages.history`
 - ⬜ Query methods: `unanswered_messages()`, `messages_by_participant()`, `chats_by_last_active()`
 
 ---

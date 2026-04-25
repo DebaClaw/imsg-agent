@@ -97,6 +97,11 @@ def _parse_message(data: dict[str, Any]) -> Message:
         destination_caller_id=data.get("destination_caller_id") or None,
         is_reaction=bool(data.get("is_reaction")),
         reaction_type=data.get("reaction_type") or None,
+        chat_identifier=data.get("chat_identifier") or "",
+        chat_guid=data.get("chat_guid") or "",
+        chat_name=data.get("chat_name") or "",
+        participants=list(data.get("participants") or []),
+        is_group=bool(data.get("is_group")),
     )
 
 
@@ -109,6 +114,7 @@ def _parse_chat(data: dict[str, Any]) -> Chat:
         last_message_at=_dt(data.get("last_message_at")),
         guid=data.get("guid") or "",
         participants=list(data.get("participants") or []),
+        is_group=bool(data.get("is_group")),
     )
 
 
@@ -302,6 +308,7 @@ class IMsgRPCClient:
         chat_id: int | None = None,
         since_rowid: int | None = None,
         include_reactions: bool = False,
+        include_attachments: bool = False,
     ) -> AsyncGenerator[Message, None]:
         """
         Stream new messages as an async generator.
@@ -314,8 +321,12 @@ class IMsgRPCClient:
             since_rowid: Resume from this rowid — messages after it are delivered first,
                          then new arrivals stream live.
             include_reactions: Whether to include tapback reaction events.
+            include_attachments: Whether to include attachment metadata.
         """
-        params: dict[str, Any] = {"include_reactions": include_reactions}
+        params: dict[str, Any] = {
+            "include_reactions": include_reactions,
+            "attachments": include_attachments,
+        }
         if chat_id is not None:
             params["chat_id"] = chat_id
         if since_rowid is not None:

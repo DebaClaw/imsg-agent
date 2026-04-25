@@ -43,12 +43,14 @@ The system must be:
 │  rpc_client.py  →  inbox.py  →  drafter.py             │
 │                 →  sender.py                            │
 │                 →  store.py  (~/imsg-data/)             │
+│                 →  archive_store.py (SQLite archive)    │
 └────────────────────────┬────────────────────────────────┘
                          │ reads/writes markdown files
                          ▼
 ┌─────────────────────────────────────────────────────────┐
 │                   ~/imsg-data/                          │
 │   state.json  inbox/  chats/  outbox/  sent/  errors/  │
+│   imessage.sqlite                                      │
 └─────────────────────────────────────────────────────────┘
                          ▲
                          │ human edits (approve drafts, etc.)
@@ -243,6 +245,18 @@ messages). The AI drafter receives both as context.
 - Runs the agent loop: wake → poll → ingest → draft → send → checkpoint → sleep
 - Handles OS signals (SIGTERM: finish current batch, checkpoint, exit cleanly)
 - Configures logging
+
+### `archive_store.py`
+- Maintains `~/imsg-data/imessage.sqlite`
+- Stores chats, messages, attachment metadata, reactions, and archive cursor
+- Uses idempotent upserts keyed by chat id and message rowid
+- **No GenAI and no direct Messages database reads**
+
+### `archiver.py` / `archive_main.py`
+- Backfills all chats returned by `imsg rpc` with attachment metadata enabled
+- Monitors new messages with attachment metadata enabled
+- Writes only to the SQLite archive
+- Does not import the drafter or call any model API
 
 ---
 

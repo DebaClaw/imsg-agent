@@ -101,6 +101,24 @@ class TestParseMessage:
         assert len(msg.attachments) == 1
         assert msg.attachments[0].mime_type == "image/jpeg"
 
+    def test_chat_metadata_fields(self) -> None:
+        msg = _parse_message(
+            {
+                **SAMPLE_MESSAGE,
+                "chat_identifier": "iMessage;-;+14155550101",
+                "chat_guid": "chat-guid",
+                "chat_name": "Alex",
+                "participants": ["+14155550101"],
+                "is_group": True,
+            }
+        )
+
+        assert msg.chat_identifier == "iMessage;-;+14155550101"
+        assert msg.chat_guid == "chat-guid"
+        assert msg.chat_name == "Alex"
+        assert msg.participants == ["+14155550101"]
+        assert msg.is_group is True
+
 
 class TestParseChat:
     def test_basic_fields(self) -> None:
@@ -109,6 +127,10 @@ class TestParseChat:
         assert chat.name == "Alex"
         assert chat.service == "iMessage"
         assert chat.participants == ["+14155550101"]
+
+    def test_group_field(self) -> None:
+        chat = _parse_chat({**SAMPLE_CHAT, "is_group": True})
+        assert chat.is_group is True
 
     def test_last_message_at_parsed(self) -> None:
         chat = _parse_chat(SAMPLE_CHAT)
@@ -326,6 +348,43 @@ async def test_subscribe_yields_messages_from_notifications() -> None:
 
     assert len(received) == 1
     assert received[0].rowid == 12345
+    client._reader_task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_subscribe_requests_attachment_metadata() -> None:
+    process = MockIMsgProcess()
+    seen_params: dict[str, Any] = {}
+
+    def handler(req: dict[str, Any]) -> None:
+        method, req_id = req.get("method"), req.get("id")
+        if method == "watch.subscribe":
+            seen_params.update(req.get("params") or {})
+            process.send({"jsonrpc": "2.0", "id": req_id, "result": {"subscription": 42}})
+
+            async def _notify() -> None:
+                await asyncio.sleep(0)
+                process.send(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "message",
+                        "params": {"subscription": 42, "message": SAMPLE_MESSAGE},
+                    }
+                )
+
+            asyncio.create_task(_notify())
+        elif method == "watch.unsubscribe":
+            process.send({"jsonrpc": "2.0", "id": req_id, "result": {"ok": True}})
+
+    process.add_handler(handler)
+    client = IMsgRPCClient(Path("/fake/imsg"), timeout=2.0)
+    client._process = process  # type: ignore[assignment]
+    client._reader_task = asyncio.create_task(client._read_loop())
+
+    async for _ in client.subscribe(include_attachments=True):
+        break
+
+    assert seen_params["attachments"] is True
     client._reader_task.cancel()
 
 

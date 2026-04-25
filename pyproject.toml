@@ -32,6 +32,7 @@ dev = []
 
 [project.scripts]
 imsg-agent = "agent.main:cli"
+imsg-archive = "agent.archive_main:cli"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

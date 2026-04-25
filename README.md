@@ -8,10 +8,18 @@ the message is ready.
 The goal is not to automate relationships away. The goal is to help the operator notice
 what needs attention, understand the relevant context, and respond with care.
 
+It also includes `imsg-archive`, a separate no-GenAI archive command that backfills chats
+and messages into a local SQLite database and then monitors new messages into that same
+database.
+
 ## Features
 
 - **iMessage ingestion through `imsg rpc`**: no direct reads from
   `~/Library/Messages/chat.db` in this package.
+- **Local SQLite archive**: `imsg-archive` stores chats, messages, attachment metadata,
+  reactions, and a live cursor in `~/imsg-data/imessage.sqlite`.
+- **No-GenAI archive mode**: archive backfill and monitoring do not import or call the
+  drafting system or any model API.
 - **Human-readable data store**: inbox items, chat context, history, drafts, outbox,
   sent archives, errors, nudges, and digests live under `~/imsg-data/` as Markdown with
   YAML frontmatter.
@@ -42,6 +50,9 @@ agent/
   sender.py       Move approved drafts to outbox and send archived items
   nudger.py       Write proactive follow-up nudges
   summarizer.py   Write daily conversation digests
+  archive_store.py SQLite archive schema and writes
+  archiver.py     Non-GenAI archive backfill and monitor
+  archive_main.py CLI for imsg-archive
   main.py         Runtime event loop
 
 config/imsg.json  Default local configuration
@@ -58,7 +69,7 @@ tests/            Unit tests with fixtures, no live Messages database required
 - A working `imsg` executable available on `PATH`. Set `IMSG_BINARY` only if your
   executable is somewhere that the agent process cannot find through `PATH`.
 - Full Disk Access granted to the terminal app that runs `imsg-agent`.
-- An OpenAI API key for drafting.
+- An OpenAI API key for drafting. This is not needed for `imsg-archive`.
 
 Before continuing, verify the configured executable path:
 
@@ -128,6 +139,62 @@ uv run python -m agent.main
 The agent runs until `SIGINT` or `SIGTERM`. It finishes the current message, checkpoints
 the cursor, and exits cleanly.
 
+## Persistent iMessage Archive Monitor
+
+Use this path when you want a local database of iMessage data with no GenAI involved.
+The archive stores what `imsg rpc` exposes: chats, messages, reactions, and attachment
+metadata including filenames, MIME/UTI, sizes, missing flags, and original attachment
+paths. It does not copy attachment file bytes into SQLite.
+
+The default database path is:
+
+```text
+~/imsg-data/imessage.sqlite
+```
+
+Backfill all chats and historical messages that `imsg` can find:
+
+```bash
+uv run imsg-archive backfill
+```
+
+Backfill once, then keep monitoring forever:
+
+```bash
+uv run imsg-archive run
+```
+
+Only monitor new messages using the saved cursor:
+
+```bash
+uv run imsg-archive monitor
+```
+
+Useful options:
+
+```bash
+uv run imsg-archive backfill --chat-limit 10000 --history-limit 100000
+uv run imsg-archive monitor --db ~/imsg-data/imessage.sqlite
+uv run imsg-archive monitor --since-rowid 12345
+```
+
+For a persistent macOS process, run the monitor under your preferred supervisor
+(`launchd`, `tmux`, `screen`, or a terminal session you keep open). Example:
+
+```bash
+cd ~/src/imsg-agent
+uv run imsg-archive run
+```
+
+Inspect counts with SQLite:
+
+```bash
+sqlite3 ~/imsg-data/imessage.sqlite \
+  'select (select count(*) from chats) as chats,
+          (select count(*) from messages) as messages,
+          (select count(*) from attachments) as attachments;'
+```
+
 ## Approval Workflow
 
 1. A new inbound message is written to `~/imsg-data/inbox/`.
@@ -195,6 +262,7 @@ uv sync
 uv run pytest tests/ -v
 uv run ruff check .
 uv run mypy agent tests
+uv run imsg-archive --help
 ```
 
 When a work item is complete and validated, commit and push the change:
