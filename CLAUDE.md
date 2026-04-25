@@ -210,12 +210,12 @@ Do not add UI code to this repo. Keep the file-based approval path working alway
 # Prerequisites
 cd ~/src/imsg && make build          # build imsg binary
 cd ~/src/imsg-agent
-source .venv/bin/activate            # or: source ~/.local/bin/env && uv run ...
+uv sync
 cp .env.example .env                 # add OPENAI_API_KEY
-bash scripts/setup.sh                # verify permissions, create ~/imsg-data/
+uv run bash scripts/setup.sh         # verify permissions, create ~/imsg-data/
 
 # Run
-python -m agent.main                 # or: imsg-agent
+uv run python -m agent.main          # or: uv run imsg-agent
 
 # Tests (no live data required)
 uv run pytest tests/ -v
