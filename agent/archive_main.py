@@ -29,7 +29,11 @@ def archive_db_path(config: Config) -> Path:
 async def run_backfill(args: argparse.Namespace) -> None:
     config = load_config()
     archive = IMessageArchive(Path(args.db or archive_db_path(config)))
-    rpc = IMsgRPCClient(config.imsg_binary, timeout=float(config.rpc_timeout_seconds))
+    rpc = IMsgRPCClient(
+        config.imsg_binary,
+        timeout=float(config.rpc_timeout_seconds),
+        read_limit=config.rpc_read_limit_bytes,
+    )
     await rpc.start()
     try:
         chats, messages = await IMessageArchiver(archive, rpc).backfill(
@@ -53,7 +57,11 @@ async def run_backfill(args: argparse.Namespace) -> None:
 async def run_monitor(args: argparse.Namespace) -> None:
     config = load_config()
     archive = IMessageArchive(Path(args.db or archive_db_path(config)))
-    rpc = IMsgRPCClient(config.imsg_binary, timeout=float(config.rpc_timeout_seconds))
+    rpc = IMsgRPCClient(
+        config.imsg_binary,
+        timeout=float(config.rpc_timeout_seconds),
+        read_limit=config.rpc_read_limit_bytes,
+    )
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
 

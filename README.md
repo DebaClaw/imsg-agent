@@ -178,6 +178,10 @@ uv run imsg-archive monitor --db ~/imsg-data/imessage.sqlite
 uv run imsg-archive monitor --since-rowid 12345
 ```
 
+Large archives can produce large single-line JSON-RPC responses. The default RPC read
+limit is 256 MiB and can be changed in `config/imsg.json` with
+`rpc_read_limit_bytes`.
+
 For a persistent macOS process, run the monitor under your preferred supervisor
 (`launchd`, `tmux`, `screen`, or a terminal session you keep open). Example:
 

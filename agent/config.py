@@ -17,6 +17,7 @@ class Config:
     imsg_binary: Path
     data_dir: Path
     rpc_timeout_seconds: int
+    rpc_read_limit_bytes: int
     watch_debounce_ms: int
     history_limit: int
     chat_context_messages: int
@@ -50,6 +51,7 @@ def load_config(path: Path | None = None) -> Config:
         imsg_binary=Path(binary_str).expanduser(),
         data_dir=Path(data_dir_str).expanduser(),
         rpc_timeout_seconds=int(data.get("rpc_timeout_seconds", 30)),
+        rpc_read_limit_bytes=int(data.get("rpc_read_limit_bytes", 256 * 1024 * 1024)),
         watch_debounce_ms=int(data.get("watch_debounce_ms", 250)),
         history_limit=int(data.get("history_limit", 50)),
         chat_context_messages=int(data.get("chat_context_messages", 20)),

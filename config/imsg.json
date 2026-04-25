@@ -2,6 +2,7 @@
   "imsg_binary": "imsg",
   "data_dir": "~/imsg-data",
   "rpc_timeout_seconds": 30,
+  "rpc_read_limit_bytes": 268435456,
   "watch_debounce_ms": 250,
   "history_limit": 50,
   "chat_context_messages": 20,

@@ -138,9 +138,15 @@ class IMsgRPCClient:
             await client.stop()
     """
 
-    def __init__(self, binary: Path, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        binary: Path,
+        timeout: float = 30.0,
+        read_limit: int = 256 * 1024 * 1024,
+    ) -> None:
         self._binary = binary
         self._timeout = timeout
+        self._read_limit = read_limit
         self._process: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task[None] | None = None
         # Protects _next_id and the write-then-register sequence in _request
@@ -157,6 +163,7 @@ class IMsgRPCClient:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            limit=self._read_limit,
         )
         self._reader_task = asyncio.create_task(
             self._read_loop(), name="imsg-rpc-reader"

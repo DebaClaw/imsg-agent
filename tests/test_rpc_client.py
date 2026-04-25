@@ -8,7 +8,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -260,6 +260,28 @@ async def test_list_chats_parses_response() -> None:
     assert chats[0].id == 7
     assert chats[0].name == "Alex"
     client._reader_task.cancel()  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_start_sets_large_stdout_read_limit() -> None:
+    client = IMsgRPCClient(Path("/fake/imsg"), read_limit=123456)
+    process = MagicMock()
+    process.pid = 123
+    task = asyncio.create_task(asyncio.sleep(0))
+
+    def fake_create_task(coro: Any, name: str | None = None) -> asyncio.Task[None]:
+        coro.close()
+        return task
+
+    with (
+        patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as spawn,
+        patch("asyncio.create_task", side_effect=fake_create_task),
+    ):
+        await client.start()
+
+    assert spawn.await_args is not None
+    assert spawn.await_args.kwargs["limit"] == 123456
+    await task
 
 
 @pytest.mark.asyncio

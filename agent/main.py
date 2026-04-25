@@ -37,7 +37,11 @@ logger = logging.getLogger(__name__)
 async def run(config: Config) -> None:
     """Main agent loop — runs until a stop signal is received."""
     store = MessageStore(config.data_dir)
-    rpc = IMsgRPCClient(config.imsg_binary, timeout=float(config.rpc_timeout_seconds))
+    rpc = IMsgRPCClient(
+        config.imsg_binary,
+        timeout=float(config.rpc_timeout_seconds),
+        read_limit=config.rpc_read_limit_bytes,
+    )
     inbox = InboxProcessor(store, max_history=config.chat_context_messages)
     drafter: Drafter | None = None
     if config.openai_api_key:

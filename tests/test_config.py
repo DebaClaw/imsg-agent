@@ -15,6 +15,7 @@ def test_default_imsg_binary_uses_path_command(tmp_path: Path) -> None:
     config = load_config(config_path)
 
     assert str(config.imsg_binary) == "imsg"
+    assert config.rpc_read_limit_bytes == 256 * 1024 * 1024
 
 
 def test_imsg_binary_can_be_overridden_by_env(
