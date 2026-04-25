@@ -127,7 +127,7 @@ class IMessageArchiver:
                 total,
             )
             try:
-                messages = await self._rpc.get_history(
+                messages = await self._fetch_history_page(
                     chat_id=chat_id,
                     limit=limit,
                     end=end,
@@ -136,29 +136,48 @@ class IMessageArchiver:
             except IMsgRPCConnectionError:
                 elapsed = monotonic() - request_started
                 if limit <= 1:
-                    logger.exception(
-                        "Skipping chat_id=%d name=%r page=%d after timeout at "
-                        "page_size=1 end=%s elapsed=%.2fs",
+                    try:
+                        logger.warning(
+                            "Attachment history timed out for chat_id=%d name=%r "
+                            "page=%d page_size=1 end=%s elapsed=%.2fs; retrying "
+                            "without attachment metadata",
+                            chat_id,
+                            chat_name,
+                            page_number,
+                            end,
+                            elapsed,
+                        )
+                        request_started = monotonic()
+                        messages = await self._fetch_history_page(
+                            chat_id=chat_id,
+                            limit=1,
+                            end=end,
+                            include_attachments=False,
+                        )
+                    except IMsgRPCConnectionError:
+                        logger.exception(
+                            "Skipping chat_id=%d name=%r page=%d after timeout at "
+                            "page_size=1 with and without attachments end=%s",
+                            chat_id,
+                            chat_name,
+                            page_number,
+                            end,
+                        )
+                        break
+                current_page_size = max(1, limit // 2)
+                if limit > 1:
+                    logger.warning(
+                        "Timed out fetching chat_id=%d name=%r page=%d page_size=%d "
+                        "end=%s elapsed=%.2fs; retrying with %d",
                         chat_id,
                         chat_name,
                         page_number,
+                        limit,
                         end,
                         elapsed,
+                        current_page_size,
                     )
-                    break
-                current_page_size = max(1, limit // 2)
-                logger.warning(
-                    "Timed out fetching chat_id=%d name=%r page=%d page_size=%d "
-                    "end=%s elapsed=%.2fs; retrying with %d",
-                    chat_id,
-                    chat_name,
-                    page_number,
-                    limit,
-                    end,
-                    elapsed,
-                    current_page_size,
-                )
-                continue
+                    continue
             elapsed = monotonic() - request_started
             if not messages:
                 logger.info(
@@ -213,6 +232,21 @@ class IMessageArchiver:
                 break
 
         return total
+
+    async def _fetch_history_page(
+        self,
+        *,
+        chat_id: int,
+        limit: int,
+        end: str | None,
+        include_attachments: bool,
+    ) -> list[Message]:
+        return await self._rpc.get_history(
+            chat_id=chat_id,
+            limit=limit,
+            end=end,
+            include_attachments=include_attachments,
+        )
 
     async def monitor(self, *, since_rowid: int | None = None) -> None:
         """Watch for new messages and archive them forever."""

@@ -210,7 +210,55 @@ async def test_backfill_skips_page_after_single_message_timeout(tmp_path: Path) 
 
     assert chats == 1
     assert messages == 0
-    assert rpc.history_limits == [4, 2, 1]
+    assert rpc.history_limits == [4, 2, 1, 1]
+    archive.close()
+
+
+@pytest.mark.asyncio
+async def test_backfill_falls_back_to_no_attachments_for_single_message_timeout(
+    tmp_path: Path,
+) -> None:
+    class AttachmentTimeoutRPC(FakeRPC):
+        def __init__(self) -> None:
+            super().__init__()
+            self.include_attachments_calls: list[bool] = []
+
+        async def list_chats(self, limit: int = 20) -> list[Chat]:
+            return [_chat(7)]
+
+        async def get_history(
+            self,
+            chat_id: int,
+            limit: int = 50,
+            participants: list[str] | None = None,
+            start: str | None = None,
+            end: str | None = None,
+            include_attachments: bool = False,
+        ) -> list[Message]:
+            self.history_limits.append(limit)
+            self.include_attachments_calls.append(include_attachments)
+            if include_attachments:
+                raise IMsgRPCConnectionError("timeout")
+            if end is not None:
+                return []
+            message = _message(rowid=1, chat_id=chat_id)
+            message.has_attachments = False
+            message.attachments = []
+            return [message]
+
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    rpc = AttachmentTimeoutRPC()
+
+    chats, messages = await IMessageArchiver(archive, rpc).backfill(
+        history_limit=1,
+        history_page_size=1,
+    )
+
+    assert chats == 1
+    assert messages == 1
+    assert archive.count_messages() == 1
+    assert archive.count_attachments() == 0
+    assert rpc.include_attachments_calls == [True, False]
     archive.close()
 
 

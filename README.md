@@ -185,6 +185,8 @@ to return every message in one RPC response. If a page still times out, lower
 `--history-page-size` or increase `rpc_timeout_seconds` in `config/imsg.json`.
 Backfill also retries timed-out pages with progressively smaller page sizes down to one
 message before skipping that page and continuing.
+If a one-message page still times out with attachment metadata enabled, it retries that
+one-message page without attachment metadata so the message row is still archived.
 Use `--debug` to print each chat/page boundary, elapsed request time, rowid/date range,
 attachment count, and retry decisions.
 
