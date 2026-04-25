@@ -174,8 +174,9 @@ Useful options:
 
 ```bash
 uv run imsg-archive backfill --chat-limit 10000 --history-limit 100000
-uv run imsg-archive backfill --history-page-size 500
-uv run imsg-archive backfill --debug --history-page-size 250
+uv run imsg-archive backfill --history-page-size 100
+uv run imsg-archive backfill --debug --history-page-size 50
+uv run imsg-archive backfill --debug --no-attachments --history-page-size 50
 uv run imsg-archive monitor --db ~/imsg-data/imessage.sqlite
 uv run imsg-archive monitor --since-rowid 12345
 ```
@@ -189,6 +190,10 @@ If a one-message page still times out with attachment metadata enabled, it retri
 one-message page without attachment metadata so the message row is still archived.
 Use `--debug` to print each chat/page boundary, elapsed request time, rowid/date range,
 attachment count, and retry decisions.
+Use `--no-attachments` as a diagnostic/degraded mode when `messages.history` responds
+quickly without attachment metadata but stalls while expanding attachments or reactions.
+That mode still archives chats and messages, but `attachments` and `reactions` tables
+will not be populated for those fetched messages.
 
 For a persistent macOS process, run the monitor under your preferred supervisor
 (`launchd`, `tmux`, `screen`, or a terminal session you keep open). Example:

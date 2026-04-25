@@ -17,6 +17,7 @@ from collections.abc import AsyncGenerator
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from .models import Attachment, Chat, Message, Reaction
@@ -116,6 +117,19 @@ def _parse_chat(data: dict[str, Any]) -> Chat:
         participants=list(data.get("participants") or []),
         is_group=bool(data.get("is_group")),
     )
+
+
+def _safe_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Return RPC params suitable for diagnostic logs without message/file content."""
+    safe = dict(params)
+    for key in ("text", "file"):
+        if key in safe:
+            value = safe[key]
+            if isinstance(value, str):
+                safe[key] = f"<redacted {len(value)} chars>"
+            else:
+                safe[key] = "<redacted>"
+    return safe
 
 
 # ---------------------------------------------------------------------------
@@ -266,13 +280,39 @@ class IMsgRPCClient:
         payload = json.dumps(
             {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}
         )
+        safe_params = _safe_params(params)
+        started = monotonic()
+        logger.debug(
+            "RPC request id=%d method=%s params=%s timeout=%.1fs",
+            req_id,
+            method,
+            safe_params,
+            self._timeout,
+        )
         self._process.stdin.write((payload + "\n").encode())
         await self._process.stdin.drain()
 
         try:
-            return await asyncio.wait_for(asyncio.shield(future), timeout=self._timeout)
+            result = await asyncio.wait_for(
+                asyncio.shield(future), timeout=self._timeout
+            )
+            logger.debug(
+                "RPC response id=%d method=%s elapsed=%.2fs",
+                req_id,
+                method,
+                monotonic() - started,
+            )
+            return result
         except TimeoutError as exc:
             self._pending.pop(req_id, None)
+            logger.error(
+                "RPC timeout id=%d method=%s params=%s elapsed=%.2fs timeout=%.1fs",
+                req_id,
+                method,
+                safe_params,
+                monotonic() - started,
+                self._timeout,
+            )
             raise IMsgRPCConnectionError(
                 f"Request timed out after {self._timeout}s: {method}"
             ) from exc

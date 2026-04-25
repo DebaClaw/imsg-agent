@@ -48,16 +48,19 @@ class IMessageArchiver:
         *,
         chat_limit: int = 10_000,
         history_limit: int = 100_000,
-        history_page_size: int = 1_000,
+        history_page_size: int = 100,
+        include_attachments: bool = True,
         debug: bool = False,
     ) -> tuple[int, int]:
         """Fetch chats and historical messages into SQLite."""
         started = monotonic()
         logger.info(
-            "Starting archive backfill chat_limit=%d history_limit=%d history_page_size=%d",
+            "Starting archive backfill chat_limit=%d history_limit=%d "
+            "history_page_size=%d include_attachments=%s",
             chat_limit,
             history_limit,
             history_page_size,
+            include_attachments,
         )
         chats = await self._rpc.list_chats(limit=chat_limit)
         logger.info("Found %d chats to archive", len(chats))
@@ -79,6 +82,7 @@ class IMessageArchiver:
                 chat_id=chat.id,
                 history_limit=history_limit,
                 history_page_size=history_page_size,
+                include_attachments=include_attachments,
                 debug=debug,
             )
             message_count += archived_for_chat
@@ -104,6 +108,7 @@ class IMessageArchiver:
         chat_id: int,
         history_limit: int,
         history_page_size: int,
+        include_attachments: bool,
         debug: bool,
     ) -> int:
         total = 0
@@ -118,12 +123,14 @@ class IMessageArchiver:
             page_number += 1
             request_started = monotonic()
             logger.info(
-                "Fetching chat_id=%d name=%r page=%d limit=%d end=%s total_for_chat=%d",
+                "Fetching chat_id=%d name=%r page=%d limit=%d end=%s "
+                "include_attachments=%s total_for_chat=%d",
                 chat_id,
                 chat_name,
                 page_number,
                 limit,
                 end,
+                include_attachments,
                 total,
             )
             try:
@@ -131,11 +138,11 @@ class IMessageArchiver:
                     chat_id=chat_id,
                     limit=limit,
                     end=end,
-                    include_attachments=True,
+                    include_attachments=include_attachments,
                 )
             except IMsgRPCConnectionError:
                 elapsed = monotonic() - request_started
-                if limit <= 1:
+                if limit <= 1 and include_attachments:
                     try:
                         logger.warning(
                             "Attachment history timed out for chat_id=%d name=%r "
@@ -164,20 +171,31 @@ class IMessageArchiver:
                             end,
                         )
                         break
-                current_page_size = max(1, limit // 2)
-                if limit > 1:
-                    logger.warning(
-                        "Timed out fetching chat_id=%d name=%r page=%d page_size=%d "
-                        "end=%s elapsed=%.2fs; retrying with %d",
+                else:
+                    current_page_size = max(1, limit // 2)
+                    if limit > 1:
+                        logger.warning(
+                            "Timed out fetching chat_id=%d name=%r page=%d page_size=%d "
+                            "end=%s elapsed=%.2fs; retrying with %d",
+                            chat_id,
+                            chat_name,
+                            page_number,
+                            limit,
+                            end,
+                            elapsed,
+                            current_page_size,
+                        )
+                        continue
+                    logger.exception(
+                        "Skipping chat_id=%d name=%r page=%d after timeout at "
+                        "page_size=1 include_attachments=%s end=%s",
                         chat_id,
                         chat_name,
                         page_number,
-                        limit,
+                        include_attachments,
                         end,
-                        elapsed,
-                        current_page_size,
                     )
-                    continue
+                    break
             elapsed = monotonic() - request_started
             if not messages:
                 logger.info(
@@ -248,12 +266,17 @@ class IMessageArchiver:
             include_attachments=include_attachments,
         )
 
-    async def monitor(self, *, since_rowid: int | None = None) -> None:
+    async def monitor(
+        self,
+        *,
+        since_rowid: int | None = None,
+        include_attachments: bool = True,
+    ) -> None:
         """Watch for new messages and archive them forever."""
         cursor = self._archive.read_cursor() if since_rowid is None else since_rowid
         async for message in self._rpc.subscribe(
             since_rowid=cursor if cursor > 0 else None,
-            include_attachments=True,
+            include_attachments=include_attachments,
         ):
             self._archive.upsert_message(message)
             logger.info(

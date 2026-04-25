@@ -40,6 +40,7 @@ async def run_backfill(args: argparse.Namespace) -> None:
             chat_limit=args.chat_limit,
             history_limit=args.history_limit,
             history_page_size=args.history_page_size,
+            include_attachments=not args.no_attachments,
             debug=args.debug,
         )
         logger.info(
@@ -76,7 +77,10 @@ async def run_monitor(args: argparse.Namespace) -> None:
 
     await rpc.start()
     monitor_task = asyncio.create_task(
-        IMessageArchiver(archive, rpc).monitor(since_rowid=args.since_rowid)
+        IMessageArchiver(archive, rpc).monitor(
+            since_rowid=args.since_rowid,
+            include_attachments=not args.no_attachments,
+        )
     )
     try:
         await stop_event.wait()
@@ -91,20 +95,63 @@ async def run_forever(args: argparse.Namespace) -> None:
     await run_monitor(args)
 
 
+def _add_options(
+    parser: argparse.ArgumentParser,
+    *,
+    defaults: bool,
+) -> None:
+    default = None if defaults else argparse.SUPPRESS
+    parser.add_argument(
+        "--db",
+        default=default,
+        help="SQLite DB path. Defaults to ~/imsg-data/imessage.sqlite",
+    )
+    parser.add_argument("--chat-limit", type=int, default=10_000 if defaults else default)
+    parser.add_argument(
+        "--history-limit",
+        type=int,
+        default=100_000 if defaults else default,
+    )
+    parser.add_argument(
+        "--history-page-size",
+        type=int,
+        default=100 if defaults else default,
+    )
+    parser.add_argument("--since-rowid", type=int, default=default)
+    parser.add_argument(
+        "--no-attachments",
+        action="store_true",
+        default=False if defaults else default,
+        help=(
+            "Do not request attachment/reaction metadata from imsg. This is a "
+            "diagnostic/degraded mode; message rows are still archived."
+        ),
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=False if defaults else default,
+        help="Enable verbose archive progress logs",
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Archive iMessage chats and messages to local SQLite without GenAI."
     )
-    parser.add_argument("--db", help="SQLite DB path. Defaults to ~/imsg-data/imessage.sqlite")
-    parser.add_argument("--chat-limit", type=int, default=10_000)
-    parser.add_argument("--history-limit", type=int, default=100_000)
-    parser.add_argument("--history-page-size", type=int, default=1_000)
-    parser.add_argument("--since-rowid", type=int, default=None)
-    parser.add_argument("--debug", action="store_true", help="Enable verbose archive progress logs")
+    _add_options(parser, defaults=True)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("backfill", help="Fetch chats and historical messages, then exit")
-    subparsers.add_parser("monitor", help="Watch new messages and append them to SQLite")
-    subparsers.add_parser("run", help="Backfill once, then monitor")
+    backfill = subparsers.add_parser(
+        "backfill",
+        help="Fetch chats and historical messages, then exit",
+    )
+    monitor = subparsers.add_parser(
+        "monitor",
+        help="Watch new messages and append them to SQLite",
+    )
+    run = subparsers.add_parser("run", help="Backfill once, then monitor")
+    for subparser in (backfill, monitor, run):
+        _add_options(subparser, defaults=False)
     return parser
 
 
