@@ -9,6 +9,7 @@ import pytest
 from agent.archive_store import IMessageArchive
 from agent.archiver import IMessageArchiver
 from agent.models import Attachment, Chat, Message
+from agent.rpc_client import IMsgRPCConnectionError
 
 NOW = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
 
@@ -141,6 +142,74 @@ async def test_backfill_pages_large_chat_history(tmp_path: Path) -> None:
     assert rpc.history_limits == [2, 2]
     assert rpc.history_ends[0] is None
     assert rpc.history_ends[1] is not None
+    archive.close()
+
+
+@pytest.mark.asyncio
+async def test_backfill_retries_timeout_until_page_succeeds(tmp_path: Path) -> None:
+    class TimeoutThenSmallerRPC(FakeRPC):
+        async def list_chats(self, limit: int = 20) -> list[Chat]:
+            return [_chat(7)]
+
+        async def get_history(
+            self,
+            chat_id: int,
+            limit: int = 50,
+            participants: list[str] | None = None,
+            start: str | None = None,
+            end: str | None = None,
+            include_attachments: bool = False,
+            ) -> list[Message]:
+                self.history_limits.append(limit)
+                if limit > 1:
+                    raise IMsgRPCConnectionError("timeout")
+                if end is not None:
+                    return []
+                return [_message(rowid=1)]
+
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    rpc = TimeoutThenSmallerRPC()
+
+    chats, messages = await IMessageArchiver(archive, rpc).backfill(
+        history_limit=2,
+        history_page_size=4,
+    )
+
+    assert chats == 1
+    assert messages == 1
+    assert rpc.history_limits == [2, 1, 1]
+    archive.close()
+
+
+@pytest.mark.asyncio
+async def test_backfill_skips_page_after_single_message_timeout(tmp_path: Path) -> None:
+    class AlwaysTimeoutRPC(FakeRPC):
+        async def list_chats(self, limit: int = 20) -> list[Chat]:
+            return [_chat(7)]
+
+        async def get_history(
+            self,
+            chat_id: int,
+            limit: int = 50,
+            participants: list[str] | None = None,
+            start: str | None = None,
+            end: str | None = None,
+            include_attachments: bool = False,
+        ) -> list[Message]:
+            self.history_limits.append(limit)
+            raise IMsgRPCConnectionError("timeout")
+
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    rpc = AlwaysTimeoutRPC()
+
+    chats, messages = await IMessageArchiver(archive, rpc).backfill(
+        history_limit=10,
+        history_page_size=4,
+    )
+
+    assert chats == 1
+    assert messages == 0
+    assert rpc.history_limits == [4, 2, 1]
     archive.close()
 
 

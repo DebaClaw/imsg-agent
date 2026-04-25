@@ -10,6 +10,7 @@ from typing import Protocol
 
 from .archive_store import IMessageArchive
 from .models import Chat, Message
+from .rpc_client import IMsgRPCConnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -78,21 +79,41 @@ class IMessageArchiver:
         end: str | None = None
         seen_oldest: tuple[int, str] | None = None
         page_size = max(1, history_page_size)
+        current_page_size = page_size
 
         while total < history_limit:
-            limit = min(page_size, history_limit - total)
-            messages = await self._rpc.get_history(
-                chat_id=chat_id,
-                limit=limit,
-                end=end,
-                include_attachments=True,
-            )
+            limit = min(current_page_size, history_limit - total)
+            try:
+                messages = await self._rpc.get_history(
+                    chat_id=chat_id,
+                    limit=limit,
+                    end=end,
+                    include_attachments=True,
+                )
+            except IMsgRPCConnectionError:
+                if limit <= 1:
+                    logger.exception(
+                        "Skipping chat_id=%d page after timeout at page_size=1 end=%s",
+                        chat_id,
+                        end,
+                    )
+                    break
+                current_page_size = max(1, limit // 2)
+                logger.warning(
+                    "Timed out fetching chat_id=%d page_size=%d end=%s; retrying with %d",
+                    chat_id,
+                    limit,
+                    end,
+                    current_page_size,
+                )
+                continue
             if not messages:
                 break
 
             for message in messages:
                 self._archive.upsert_message(message)
             total += len(messages)
+            current_page_size = page_size
 
             oldest = min(messages, key=lambda message: (message.date, message.rowid))
             oldest_key = (oldest.rowid, oldest.date.isoformat())

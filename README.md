@@ -182,6 +182,8 @@ uv run imsg-archive monitor --since-rowid 12345
 Backfill pages each chat's history using `--history-page-size` so large chats do not need
 to return every message in one RPC response. If a page still times out, lower
 `--history-page-size` or increase `rpc_timeout_seconds` in `config/imsg.json`.
+Backfill also retries timed-out pages with progressively smaller page sizes down to one
+message before skipping that page and continuing.
 
 For a persistent macOS process, run the monitor under your preferred supervisor
 (`launchd`, `tmux`, `screen`, or a terminal session you keep open). Example:
