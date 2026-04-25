@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncGenerator
+from datetime import timedelta
 from typing import Protocol
 
 from .archive_store import IMessageArchive
@@ -45,27 +46,76 @@ class IMessageArchiver:
         *,
         chat_limit: int = 10_000,
         history_limit: int = 100_000,
+        history_page_size: int = 1_000,
     ) -> tuple[int, int]:
         """Fetch chats and historical messages into SQLite."""
         chats = await self._rpc.list_chats(limit=chat_limit)
         message_count = 0
         for chat in chats:
             self._archive.upsert_chat(chat)
-            messages = await self._rpc.get_history(
+            archived_for_chat = await self._backfill_chat_history(
                 chat_id=chat.id,
-                limit=history_limit,
-                include_attachments=True,
+                history_limit=history_limit,
+                history_page_size=history_page_size,
             )
-            for message in messages:
-                self._archive.upsert_message(message)
-            message_count += len(messages)
+            message_count += archived_for_chat
             logger.info(
                 "Archived chat_id=%d messages=%d total_messages=%d",
                 chat.id,
-                len(messages),
+                archived_for_chat,
                 message_count,
             )
         return len(chats), message_count
+
+    async def _backfill_chat_history(
+        self,
+        *,
+        chat_id: int,
+        history_limit: int,
+        history_page_size: int,
+    ) -> int:
+        total = 0
+        end: str | None = None
+        seen_oldest: tuple[int, str] | None = None
+        page_size = max(1, history_page_size)
+
+        while total < history_limit:
+            limit = min(page_size, history_limit - total)
+            messages = await self._rpc.get_history(
+                chat_id=chat_id,
+                limit=limit,
+                end=end,
+                include_attachments=True,
+            )
+            if not messages:
+                break
+
+            for message in messages:
+                self._archive.upsert_message(message)
+            total += len(messages)
+
+            oldest = min(messages, key=lambda message: (message.date, message.rowid))
+            oldest_key = (oldest.rowid, oldest.date.isoformat())
+            if oldest_key == seen_oldest:
+                logger.warning(
+                    "Stopping chat_id=%d backfill because pagination did not advance",
+                    chat_id,
+                )
+                break
+            seen_oldest = oldest_key
+            end = (oldest.date - timedelta(microseconds=1)).isoformat()
+
+            logger.info(
+                "Archived page chat_id=%d page_messages=%d total_for_chat=%d next_end=%s",
+                chat_id,
+                len(messages),
+                total,
+                end,
+            )
+            if len(messages) < limit:
+                break
+
+        return total
 
     async def monitor(self, *, since_rowid: int | None = None) -> None:
         """Watch for new messages and archive them forever."""

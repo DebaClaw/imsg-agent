@@ -39,6 +39,7 @@ async def run_backfill(args: argparse.Namespace) -> None:
         chats, messages = await IMessageArchiver(archive, rpc).backfill(
             chat_limit=args.chat_limit,
             history_limit=args.history_limit,
+            history_page_size=args.history_page_size,
         )
         logger.info(
             "Backfill complete chats=%d messages=%d total_chats=%d "
@@ -96,6 +97,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", help="SQLite DB path. Defaults to ~/imsg-data/imessage.sqlite")
     parser.add_argument("--chat-limit", type=int, default=10_000)
     parser.add_argument("--history-limit", type=int, default=100_000)
+    parser.add_argument("--history-page-size", type=int, default=1_000)
     parser.add_argument("--since-rowid", type=int, default=None)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("backfill", help="Fetch chats and historical messages, then exit")

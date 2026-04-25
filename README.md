@@ -174,13 +174,14 @@ Useful options:
 
 ```bash
 uv run imsg-archive backfill --chat-limit 10000 --history-limit 100000
+uv run imsg-archive backfill --history-page-size 500
 uv run imsg-archive monitor --db ~/imsg-data/imessage.sqlite
 uv run imsg-archive monitor --since-rowid 12345
 ```
 
-Large archives can produce large single-line JSON-RPC responses. The default RPC read
-limit is 256 MiB and can be changed in `config/imsg.json` with
-`rpc_read_limit_bytes`.
+Backfill pages each chat's history using `--history-page-size` so large chats do not need
+to return every message in one RPC response. If a page still times out, lower
+`--history-page-size` or increase `rpc_timeout_seconds` in `config/imsg.json`.
 
 For a persistent macOS process, run the monitor under your preferred supervisor
 (`launchd`, `tmux`, `screen`, or a terminal session you keep open). Example:

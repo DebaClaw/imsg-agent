@@ -52,6 +52,8 @@ def _message(rowid: int = 1, chat_id: int = 7) -> Message:
 class FakeRPC:
     def __init__(self) -> None:
         self.history_include_attachments: list[bool] = []
+        self.history_limits: list[int] = []
+        self.history_ends: list[str | None] = []
         self.subscribe_include_attachments: bool | None = None
         self.subscribe_since_rowid: int | None = None
 
@@ -68,6 +70,10 @@ class FakeRPC:
         include_attachments: bool = False,
     ) -> list[Message]:
         self.history_include_attachments.append(include_attachments)
+        self.history_limits.append(limit)
+        self.history_ends.append(end)
+        if end is not None:
+            return []
         return [_message(rowid=chat_id * 10, chat_id=chat_id)]
 
     async def subscribe(
@@ -95,6 +101,46 @@ async def test_backfill_archives_all_chats_with_attachments(tmp_path: Path) -> N
     assert archive.count_messages() == 2
     assert archive.count_attachments() == 2
     assert rpc.history_include_attachments == [True, True]
+    assert rpc.history_limits == [1000, 1000]
+    assert rpc.history_ends == [None, None]
+    archive.close()
+
+
+@pytest.mark.asyncio
+async def test_backfill_pages_large_chat_history(tmp_path: Path) -> None:
+    class PagingRPC(FakeRPC):
+        async def list_chats(self, limit: int = 20) -> list[Chat]:
+            return [_chat(7)]
+
+        async def get_history(
+            self,
+            chat_id: int,
+            limit: int = 50,
+            participants: list[str] | None = None,
+            start: str | None = None,
+            end: str | None = None,
+            include_attachments: bool = False,
+        ) -> list[Message]:
+            self.history_limits.append(limit)
+            self.history_ends.append(end)
+            if end is None:
+                return [_message(rowid=3), _message(rowid=2)]
+            return [_message(rowid=1)]
+
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    rpc = PagingRPC()
+
+    chats, messages = await IMessageArchiver(archive, rpc).backfill(
+        history_limit=10,
+        history_page_size=2,
+    )
+
+    assert chats == 1
+    assert messages == 3
+    assert archive.count_messages() == 3
+    assert rpc.history_limits == [2, 2]
+    assert rpc.history_ends[0] is None
+    assert rpc.history_ends[1] is not None
     archive.close()
 
 
