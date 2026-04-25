@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from datetime import timedelta
+from time import monotonic
 from typing import Protocol
 
 from .archive_store import IMessageArchive
@@ -48,41 +49,83 @@ class IMessageArchiver:
         chat_limit: int = 10_000,
         history_limit: int = 100_000,
         history_page_size: int = 1_000,
+        debug: bool = False,
     ) -> tuple[int, int]:
         """Fetch chats and historical messages into SQLite."""
+        started = monotonic()
+        logger.info(
+            "Starting archive backfill chat_limit=%d history_limit=%d history_page_size=%d",
+            chat_limit,
+            history_limit,
+            history_page_size,
+        )
         chats = await self._rpc.list_chats(limit=chat_limit)
+        logger.info("Found %d chats to archive", len(chats))
         message_count = 0
-        for chat in chats:
+        for idx, chat in enumerate(chats, start=1):
+            chat_started = monotonic()
             self._archive.upsert_chat(chat)
+            logger.info(
+                "Starting chat %d/%d chat_id=%d name=%r identifier=%r participants=%d",
+                idx,
+                len(chats),
+                chat.id,
+                chat.name,
+                chat.identifier,
+                len(chat.participants),
+            )
             archived_for_chat = await self._backfill_chat_history(
+                chat_name=chat.name,
                 chat_id=chat.id,
                 history_limit=history_limit,
                 history_page_size=history_page_size,
+                debug=debug,
             )
             message_count += archived_for_chat
             logger.info(
-                "Archived chat_id=%d messages=%d total_messages=%d",
+                "Finished chat_id=%d messages=%d total_messages=%d elapsed=%.2fs",
                 chat.id,
                 archived_for_chat,
                 message_count,
+                monotonic() - chat_started,
             )
+        logger.info(
+            "Backfill finished chats=%d messages=%d elapsed=%.2fs",
+            len(chats),
+            message_count,
+            monotonic() - started,
+        )
         return len(chats), message_count
 
     async def _backfill_chat_history(
         self,
         *,
+        chat_name: str,
         chat_id: int,
         history_limit: int,
         history_page_size: int,
+        debug: bool,
     ) -> int:
         total = 0
         end: str | None = None
         seen_oldest: tuple[int, str] | None = None
         page_size = max(1, history_page_size)
         current_page_size = page_size
+        page_number = 0
 
         while total < history_limit:
             limit = min(current_page_size, history_limit - total)
+            page_number += 1
+            request_started = monotonic()
+            logger.info(
+                "Fetching chat_id=%d name=%r page=%d limit=%d end=%s total_for_chat=%d",
+                chat_id,
+                chat_name,
+                page_number,
+                limit,
+                end,
+                total,
+            )
             try:
                 messages = await self._rpc.get_history(
                     chat_id=chat_id,
@@ -91,23 +134,40 @@ class IMessageArchiver:
                     include_attachments=True,
                 )
             except IMsgRPCConnectionError:
+                elapsed = monotonic() - request_started
                 if limit <= 1:
                     logger.exception(
-                        "Skipping chat_id=%d page after timeout at page_size=1 end=%s",
+                        "Skipping chat_id=%d name=%r page=%d after timeout at "
+                        "page_size=1 end=%s elapsed=%.2fs",
                         chat_id,
+                        chat_name,
+                        page_number,
                         end,
+                        elapsed,
                     )
                     break
                 current_page_size = max(1, limit // 2)
                 logger.warning(
-                    "Timed out fetching chat_id=%d page_size=%d end=%s; retrying with %d",
+                    "Timed out fetching chat_id=%d name=%r page=%d page_size=%d "
+                    "end=%s elapsed=%.2fs; retrying with %d",
                     chat_id,
+                    chat_name,
+                    page_number,
                     limit,
                     end,
+                    elapsed,
                     current_page_size,
                 )
                 continue
+            elapsed = monotonic() - request_started
             if not messages:
+                logger.info(
+                    "No more messages chat_id=%d name=%r page=%d elapsed=%.2fs",
+                    chat_id,
+                    chat_name,
+                    page_number,
+                    elapsed,
+                )
                 break
 
             for message in messages:
@@ -116,20 +176,36 @@ class IMessageArchiver:
             current_page_size = page_size
 
             oldest = min(messages, key=lambda message: (message.date, message.rowid))
+            newest = max(messages, key=lambda message: (message.date, message.rowid))
             oldest_key = (oldest.rowid, oldest.date.isoformat())
             if oldest_key == seen_oldest:
                 logger.warning(
-                    "Stopping chat_id=%d backfill because pagination did not advance",
+                    "Stopping chat_id=%d name=%r because pagination did not advance "
+                    "oldest_rowid=%d oldest_date=%s",
                     chat_id,
+                    chat_name,
+                    oldest.rowid,
+                    oldest.date.isoformat(),
                 )
                 break
             seen_oldest = oldest_key
             end = (oldest.date - timedelta(microseconds=1)).isoformat()
 
-            logger.info(
-                "Archived page chat_id=%d page_messages=%d total_for_chat=%d next_end=%s",
+            log = logger.info if debug else logger.debug
+            log(
+                "Archived page chat_id=%d name=%r page=%d messages=%d "
+                "oldest_rowid=%d oldest_date=%s newest_rowid=%d newest_date=%s "
+                "attachments=%d elapsed=%.2fs total_for_chat=%d next_end=%s",
                 chat_id,
+                chat_name,
+                page_number,
                 len(messages),
+                oldest.rowid,
+                oldest.date.isoformat(),
+                newest.rowid,
+                newest.date.isoformat(),
+                sum(len(message.attachments) for message in messages),
+                elapsed,
                 total,
                 end,
             )

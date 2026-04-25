@@ -40,6 +40,7 @@ async def run_backfill(args: argparse.Namespace) -> None:
             chat_limit=args.chat_limit,
             history_limit=args.history_limit,
             history_page_size=args.history_page_size,
+            debug=args.debug,
         )
         logger.info(
             "Backfill complete chats=%d messages=%d total_chats=%d "
@@ -99,6 +100,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--history-limit", type=int, default=100_000)
     parser.add_argument("--history-page-size", type=int, default=1_000)
     parser.add_argument("--since-rowid", type=int, default=None)
+    parser.add_argument("--debug", action="store_true", help="Enable verbose archive progress logs")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("backfill", help="Fetch chats and historical messages, then exit")
     subparsers.add_parser("monitor", help="Watch new messages and append them to SQLite")
@@ -108,13 +110,14 @@ def _parser() -> argparse.ArgumentParser:
 
 def cli() -> None:
     load_dotenv()
-    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    parser = _parser()
+    args = parser.parse_args()
+    log_level = "DEBUG" if args.debug else os.environ.get("LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
-    args = _parser().parse_args()
     if args.command == "backfill":
         asyncio.run(run_backfill(args))
     elif args.command == "monitor":

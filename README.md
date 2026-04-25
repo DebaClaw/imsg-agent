@@ -175,6 +175,7 @@ Useful options:
 ```bash
 uv run imsg-archive backfill --chat-limit 10000 --history-limit 100000
 uv run imsg-archive backfill --history-page-size 500
+uv run imsg-archive backfill --debug --history-page-size 250
 uv run imsg-archive monitor --db ~/imsg-data/imessage.sqlite
 uv run imsg-archive monitor --since-rowid 12345
 ```
@@ -184,6 +185,8 @@ to return every message in one RPC response. If a page still times out, lower
 `--history-page-size` or increase `rpc_timeout_seconds` in `config/imsg.json`.
 Backfill also retries timed-out pages with progressively smaller page sizes down to one
 message before skipping that page and continuing.
+Use `--debug` to print each chat/page boundary, elapsed request time, rowid/date range,
+attachment count, and retry decisions.
 
 For a persistent macOS process, run the monitor under your preferred supervisor
 (`launchd`, `tmux`, `screen`, or a terminal session you keep open). Example:

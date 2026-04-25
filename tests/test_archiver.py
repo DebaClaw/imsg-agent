@@ -134,6 +134,7 @@ async def test_backfill_pages_large_chat_history(tmp_path: Path) -> None:
     chats, messages = await IMessageArchiver(archive, rpc).backfill(
         history_limit=10,
         history_page_size=2,
+        debug=True,
     )
 
     assert chats == 1
