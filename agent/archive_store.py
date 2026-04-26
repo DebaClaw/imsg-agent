@@ -14,9 +14,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .contact_enrichment import (
+    ContactRecord,
+    ContactsEnrichResult,
+    ContactsSyncResult,
+    normalize_identifier,
+)
 from .models import Attachment, Chat, Message, Reaction
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -136,6 +142,51 @@ class IMessageArchive:
             CREATE INDEX IF NOT EXISTS idx_messages_chat_date ON messages(chat_id, date);
             CREATE INDEX IF NOT EXISTS idx_messages_guid ON messages(guid);
             CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_rowid);
+
+            CREATE TABLE IF NOT EXISTS contacts (
+                contact_id TEXT PRIMARY KEY,
+                full_name TEXT NOT NULL DEFAULT '',
+                given_name TEXT NOT NULL DEFAULT '',
+                family_name TEXT NOT NULL DEFAULT '',
+                organization_name TEXT NOT NULL DEFAULT '',
+                organization_title TEXT NOT NULL DEFAULT '',
+                birthday TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                categories_json TEXT NOT NULL DEFAULT '[]',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS contact_points (
+                contact_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                value TEXT NOT NULL,
+                original_value TEXT NOT NULL DEFAULT '',
+                label TEXT NOT NULL DEFAULT '',
+                primary_flag INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (contact_id) REFERENCES contacts(contact_id) ON DELETE CASCADE,
+                UNIQUE(contact_id, kind, value)
+            );
+
+            CREATE TABLE IF NOT EXISTS chat_contact_matches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                contact_id TEXT,
+                status TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0,
+                matched_on TEXT NOT NULL DEFAULT '',
+                matched_value TEXT NOT NULL DEFAULT '',
+                source_identifier TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+                FOREIGN KEY (contact_id) REFERENCES contacts(contact_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_contact_points_value
+                ON contact_points(kind, value);
+            CREATE INDEX IF NOT EXISTS idx_chat_contact_matches_chat
+                ON chat_contact_matches(chat_id);
             """
         )
         self._ensure_column("attachments", "local_path", "TEXT NOT NULL DEFAULT ''")
@@ -307,6 +358,233 @@ class IMessageArchive:
             "SELECT COUNT(*) AS count FROM attachments WHERE archived = 1"
         ).fetchone()
         return int(row["count"])
+
+    def count_contacts(self) -> int:
+        row = self._db.execute("SELECT COUNT(*) AS count FROM contacts").fetchone()
+        return int(row["count"])
+
+    def count_contact_points(self) -> int:
+        row = self._db.execute("SELECT COUNT(*) AS count FROM contact_points").fetchone()
+        return int(row["count"])
+
+    def count_chat_contact_matches(self, status: str | None = None) -> int:
+        if status is None:
+            row = self._db.execute(
+                "SELECT COUNT(*) AS count FROM chat_contact_matches"
+            ).fetchone()
+        else:
+            row = self._db.execute(
+                "SELECT COUNT(*) AS count FROM chat_contact_matches WHERE status = ?",
+                (status,),
+            ).fetchone()
+        return int(row["count"])
+
+    def replace_contacts(self, contacts: list[ContactRecord]) -> ContactsSyncResult:
+        now = _fmt_dt(datetime.now(UTC))
+        with self._db:
+            self._db.execute("DELETE FROM contact_points")
+            self._db.execute("DELETE FROM contacts")
+            for contact in contacts:
+                self._db.execute(
+                    """
+                    INSERT INTO contacts(
+                        contact_id, full_name, given_name, family_name,
+                        organization_name, organization_title, birthday, notes,
+                        categories_json, metadata_json, updated_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        contact.contact_id,
+                        contact.full_name,
+                        contact.given_name,
+                        contact.family_name,
+                        contact.organization_name,
+                        contact.organization_title,
+                        contact.birthday,
+                        contact.notes,
+                        contact.categories_json,
+                        contact.metadata_json,
+                        now,
+                    ),
+                )
+                self._db.executemany(
+                    """
+                    INSERT INTO contact_points(
+                        contact_id, kind, value, original_value, label,
+                        primary_flag, updated_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(contact_id, kind, value) DO UPDATE SET
+                        original_value = excluded.original_value,
+                        label = excluded.label,
+                        primary_flag = excluded.primary_flag,
+                        updated_at = excluded.updated_at
+                    """,
+                    [
+                        (
+                            contact.contact_id,
+                            point.kind,
+                            point.value,
+                            point.original_value,
+                            point.label,
+                            int(point.primary),
+                            now,
+                        )
+                        for point in contact.points
+                    ],
+                )
+            self.set_meta("contacts_synced_at", now)
+        return ContactsSyncResult(
+            contacts=len(contacts),
+            contact_points=sum(len(contact.points) for contact in contacts),
+        )
+
+    def enrich_chat_contacts(self, *, default_country: str = "US") -> ContactsEnrichResult:
+        now = _fmt_dt(datetime.now(UTC))
+        chat_identifiers = self._chat_identifiers()
+        matched = 0
+        ambiguous = 0
+        unresolved = 0
+        with self._db:
+            self._db.execute("DELETE FROM chat_contact_matches")
+            for chat_id, identifiers in chat_identifiers.items():
+                seen_normalized: set[tuple[str, str]] = set()
+                for source_identifier in sorted(identifiers):
+                    normalized = normalize_identifier(source_identifier, default_country)
+                    if normalized is None:
+                        continue
+                    kind, value = normalized
+                    if (kind, value) in seen_normalized:
+                        continue
+                    seen_normalized.add((kind, value))
+                    rows = self._db.execute(
+                        """
+                        SELECT contact_id
+                        FROM contact_points
+                        WHERE kind = ? AND value = ?
+                        ORDER BY contact_id
+                        """,
+                        (kind, value),
+                    ).fetchall()
+                    if len(rows) == 1:
+                        status = "matched"
+                        confidence = 0.95 if kind == "email" else 0.9
+                        contact_id = str(rows[0]["contact_id"])
+                        matched += 1
+                        self._insert_chat_contact_match(
+                            chat_id,
+                            contact_id,
+                            status,
+                            confidence,
+                            kind,
+                            value,
+                            source_identifier,
+                            now,
+                        )
+                    elif len(rows) > 1:
+                        ambiguous += 1
+                        for row in rows:
+                            self._insert_chat_contact_match(
+                                chat_id,
+                                str(row["contact_id"]),
+                                "ambiguous",
+                                0.5,
+                                kind,
+                                value,
+                                source_identifier,
+                                now,
+                            )
+                    else:
+                        unresolved += 1
+                        self._insert_chat_contact_match(
+                            chat_id,
+                            None,
+                            "unresolved",
+                            0.0,
+                            kind,
+                            value,
+                            source_identifier,
+                            now,
+                        )
+            self.set_meta("contacts_enriched_at", now)
+        return ContactsEnrichResult(
+            chats=len(chat_identifiers),
+            matched=matched,
+            ambiguous=ambiguous,
+            unresolved=unresolved,
+        )
+
+    def _chat_identifiers(self) -> dict[int, set[str]]:
+        identifiers: dict[int, set[str]] = {}
+        for row in self._db.execute(
+            "SELECT id, identifier, participants_json FROM chats"
+        ).fetchall():
+            chat_id = int(row["id"])
+            values = identifiers.setdefault(chat_id, set())
+            self._add_identifier(values, str(row["identifier"] or ""))
+            self._add_json_identifiers(values, str(row["participants_json"] or "[]"))
+
+        for row in self._db.execute(
+            """
+            SELECT chat_id, sender, chat_identifier, participants_json
+            FROM messages
+            """
+        ).fetchall():
+            chat_id = int(row["chat_id"])
+            values = identifiers.setdefault(chat_id, set())
+            self._add_identifier(values, str(row["sender"] or ""))
+            self._add_identifier(values, str(row["chat_identifier"] or ""))
+            self._add_json_identifiers(values, str(row["participants_json"] or "[]"))
+        return identifiers
+
+    def _insert_chat_contact_match(
+        self,
+        chat_id: int,
+        contact_id: str | None,
+        status: str,
+        confidence: float,
+        matched_on: str,
+        matched_value: str,
+        source_identifier: str,
+        updated_at: str,
+    ) -> None:
+        self._db.execute(
+            """
+            INSERT INTO chat_contact_matches(
+                chat_id, contact_id, status, confidence, matched_on,
+                matched_value, source_identifier, updated_at
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                chat_id,
+                contact_id,
+                status,
+                confidence,
+                matched_on,
+                matched_value,
+                source_identifier,
+                updated_at,
+            ),
+        )
+
+    @staticmethod
+    def _add_identifier(values: set[str], value: str) -> None:
+        if value:
+            values.add(value)
+
+    @classmethod
+    def _add_json_identifiers(cls, values: set[str], json_text: str) -> None:
+        try:
+            parsed = json.loads(json_text)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(parsed, list):
+            return
+        for item in parsed:
+            if isinstance(item, str):
+                cls._add_identifier(values, item)
 
     def _ensure_chat_for_message(self, message: Message, now: str) -> None:
         self._db.execute(

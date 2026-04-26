@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from agent.archive_store import IMessageArchive
+from agent.contact_enrichment import contacts_from_json
 from agent.models import Attachment, Chat, Message, Reaction
 
 NOW = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
@@ -137,4 +138,75 @@ def test_archive_reports_oldest_message_for_chat(tmp_path: Path) -> None:
     assert archive.count_messages_for_chat(7) == 2
     assert oldest == (100, older.date)
     assert archive.oldest_message_for_chat(999) is None
+    archive.close()
+
+
+def test_archive_syncs_contacts_and_enriches_chats(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    contacts = contacts_from_json(
+        [
+            {
+                "id": "contact-1",
+                "fullName": "Alex Example",
+                "phones": [{"value": "+14155550101", "type": "mobile"}],
+            }
+        ]
+    )
+
+    sync_result = archive.replace_contacts(contacts)
+    enrich_result = archive.enrich_chat_contacts()
+
+    assert sync_result.contacts == 1
+    assert sync_result.contact_points == 1
+    assert archive.count_contacts() == 1
+    assert archive.count_contact_points() == 1
+    assert enrich_result.chats == 1
+    assert enrich_result.matched == 1
+    assert archive.count_chat_contact_matches("matched") == 1
+
+    db = sqlite3.connect(archive.path)
+    db.row_factory = sqlite3.Row
+    row = db.execute("SELECT * FROM chat_contact_matches").fetchone()
+    assert row["chat_id"] == 7
+    assert row["contact_id"] == "contact-1"
+    assert row["matched_value"] == "+14155550101"
+    archive.close()
+    db.close()
+
+
+def test_archive_records_ambiguous_and_unresolved_contact_matches(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    archive.upsert_chat(
+        Chat(
+            id=8,
+            identifier="iMessage;-;+15551234567",
+            name="Unknown",
+            service="iMessage",
+            last_message_at=NOW,
+        )
+    )
+    contacts = contacts_from_json(
+        [
+            {
+                "id": "contact-1",
+                "fullName": "Alex One",
+                "phones": [{"value": "+14155550101"}],
+            },
+            {
+                "id": "contact-2",
+                "fullName": "Alex Two",
+                "phones": [{"value": "+14155550101"}],
+            },
+        ]
+    )
+
+    archive.replace_contacts(contacts)
+    result = archive.enrich_chat_contacts()
+
+    assert result.ambiguous == 1
+    assert result.unresolved == 1
+    assert archive.count_chat_contact_matches("ambiguous") == 2
+    assert archive.count_chat_contact_matches("unresolved") == 1
     archive.close()

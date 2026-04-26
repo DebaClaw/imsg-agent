@@ -177,6 +177,15 @@ Fetch attachment metadata and copy available attachment files for archived messa
 uv run imsg-archive attachments --debug --history-page-size 250
 ```
 
+Sync Contacts data from `contacts-mcp`, then match archived chats by normalized
+phone/email identifiers:
+
+```bash
+uv run imsg-archive contacts sync \
+  --contacts-command "bun /Users/zob/src/contacts-mcp/dist/index.js"
+uv run imsg-archive contacts enrich
+```
+
 Useful options:
 
 ```bash
@@ -185,6 +194,8 @@ uv run imsg-archive backfill --history-page-size 100
 uv run imsg-archive backfill --debug --history-page-size 50
 uv run imsg-archive backfill --debug --no-attachments --history-page-size 50
 uv run imsg-archive attachments --debug --history-page-size 250
+uv run imsg-archive contacts sync --contacts-command "bun /Users/zob/src/contacts-mcp/dist/index.js"
+uv run imsg-archive contacts enrich --default-country US
 uv run imsg-archive monitor --db ~/imsg-data/imessage.sqlite
 uv run imsg-archive monitor --since-rowid 12345
 ```
@@ -207,6 +218,10 @@ will not be populated for those fetched messages.
 Run `imsg-archive attachments` after a fast `--no-attachments` backfill to enrich the
 archive with attachment metadata and copy files into `~/imsg-data/attachments/`. The
 attachment pass uses the same timeout backoff behavior as message backfill.
+Run `imsg-archive contacts sync` after syncing/exporting Contacts through
+`contacts-mcp`; then run `imsg-archive contacts enrich` to populate deterministic
+chat/contact matches. Exact normalized phone and email matches are linked automatically.
+Ambiguous and unresolved identifiers are recorded in `chat_contact_matches` for review.
 
 For a persistent macOS process, run the monitor under your preferred supervisor
 (`launchd`, `tmux`, `screen`, or a terminal session you keep open). Example:
@@ -223,7 +238,9 @@ sqlite3 ~/imsg-data/imessage.sqlite \
   'select (select count(*) from chats) as chats,
           (select count(*) from messages) as messages,
           (select count(*) from attachments) as attachments,
-          (select count(*) from attachments where archived = 1) as saved_attachments;'
+          (select count(*) from attachments where archived = 1) as saved_attachments,
+          (select count(*) from contacts) as contacts,
+          (select count(*) from chat_contact_matches where status = "matched") as matched_contact_points;'
 ```
 
 ## Approval Workflow

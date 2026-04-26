@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from .archive_store import IMessageArchive
 from .archiver import IMessageArchiver
 from .config import Config, load_config
+from .contact_enrichment import contacts_from_json, load_contacts_from_contacts_mcp
 from .rpc_client import IMsgRPCClient
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,42 @@ async def run_attachments(args: argparse.Namespace) -> None:
         )
     finally:
         await rpc.stop()
+        archive.close()
+
+
+def run_contacts_sync(args: argparse.Namespace) -> None:
+    config = load_config()
+    archive = IMessageArchive(Path(args.db or archive_db_path(config)))
+    try:
+        raw_contacts = load_contacts_from_contacts_mcp(
+            command=args.contacts_command,
+            store_path=args.contacts_store,
+            include_archived=args.include_archived,
+        )
+        contacts = contacts_from_json(raw_contacts, default_country=args.default_country)
+        result = archive.replace_contacts(contacts)
+        logger.info(
+            "Contacts sync complete contacts=%d contact_points=%d",
+            result.contacts,
+            result.contact_points,
+        )
+    finally:
+        archive.close()
+
+
+def run_contacts_enrich(args: argparse.Namespace) -> None:
+    config = load_config()
+    archive = IMessageArchive(Path(args.db or archive_db_path(config)))
+    try:
+        result = archive.enrich_chat_contacts(default_country=args.default_country)
+        logger.info(
+            "Contacts enrichment complete chats=%d matched=%d ambiguous=%d unresolved=%d",
+            result.chats,
+            result.matched,
+            result.ambiguous,
+            result.unresolved,
+        )
+    finally:
         archive.close()
 
 
@@ -182,9 +219,50 @@ def _parser() -> argparse.ArgumentParser:
         "attachments",
         help="Fetch attachment metadata and copy available attachment files locally",
     )
+    contacts = subparsers.add_parser(
+        "contacts",
+        help="Sync Contacts data and enrich archived chats",
+    )
     run = subparsers.add_parser("run", help="Backfill once, then monitor")
     for subparser in (backfill, monitor, attachments, run):
         _add_options(subparser, defaults=False)
+    contacts_subparsers = contacts.add_subparsers(
+        dest="contacts_command_name",
+        required=True,
+    )
+    contacts_sync = contacts_subparsers.add_parser(
+        "sync",
+        help="Import a Contacts snapshot from contacts-mcp into SQLite",
+    )
+    contacts_enrich = contacts_subparsers.add_parser(
+        "enrich",
+        help="Match archived chats to synced contacts by phone/email",
+    )
+    for subparser in (contacts_sync, contacts_enrich):
+        _add_options(subparser, defaults=False)
+        subparser.add_argument(
+            "--default-country",
+            default="US",
+            help="Default country for local phone normalization",
+        )
+    contacts_sync.add_argument(
+        "--contacts-command",
+        default="contacts-mcp",
+        help=(
+            "Command used to run contacts-mcp. Use e.g. "
+            "'bun /Users/zob/src/contacts-mcp/dist/index.js' when not installed."
+        ),
+    )
+    contacts_sync.add_argument(
+        "--contacts-store",
+        default=None,
+        help="Optional CONTACTS_MCP_STORE path for contacts-mcp export",
+    )
+    contacts_sync.add_argument(
+        "--include-archived",
+        action="store_true",
+        help="Include archived contacts from contacts-mcp",
+    )
     return parser
 
 
@@ -202,6 +280,11 @@ def cli() -> None:
         asyncio.run(run_backfill(args))
     elif args.command == "attachments":
         asyncio.run(run_attachments(args))
+    elif args.command == "contacts":
+        if args.contacts_command_name == "sync":
+            run_contacts_sync(args)
+        elif args.contacts_command_name == "enrich":
+            run_contacts_enrich(args)
     elif args.command == "monitor":
         asyncio.run(run_monitor(args))
     elif args.command == "run":

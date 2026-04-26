@@ -27,3 +27,29 @@ def test_archive_cli_has_attachments_command() -> None:
 
     assert args.command == "attachments"
     assert args.history_page_size == 25
+
+
+def test_archive_cli_has_contacts_sync_command() -> None:
+    args = _parser().parse_args(
+        [
+            "contacts",
+            "sync",
+            "--contacts-command",
+            "bun /Users/zob/src/contacts-mcp/dist/index.js",
+            "--contacts-store",
+            "/tmp/contacts",
+        ]
+    )
+
+    assert args.command == "contacts"
+    assert args.contacts_command_name == "sync"
+    assert args.contacts_command == "bun /Users/zob/src/contacts-mcp/dist/index.js"
+    assert args.contacts_store == "/tmp/contacts"
+
+
+def test_archive_cli_has_contacts_enrich_command() -> None:
+    args = _parser().parse_args(["contacts", "enrich", "--default-country", "US"])
+
+    assert args.command == "contacts"
+    assert args.contacts_command_name == "enrich"
+    assert args.default_country == "US"
