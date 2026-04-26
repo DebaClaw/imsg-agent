@@ -24,6 +24,7 @@ from .models import Attachment, Chat, Message, Reaction
 
 SCHEMA_VERSION = 3
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+ArchiveRow = dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -379,6 +380,179 @@ class IMessageArchive:
             ).fetchone()
         return int(row["count"])
 
+    def archive_stats(self) -> dict[str, int]:
+        row = self._db.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM chats) AS chats,
+                (SELECT COUNT(*) FROM messages) AS messages,
+                (SELECT COUNT(*) FROM attachments) AS attachments,
+                (SELECT COUNT(*) FROM attachments WHERE archived = 1) AS saved_attachments,
+                (SELECT COUNT(*) FROM attachments WHERE missing = 1) AS missing_attachments,
+                (
+                    SELECT COUNT(*)
+                    FROM attachments
+                    WHERE archive_error != ''
+                ) AS attachment_errors,
+                (SELECT COUNT(*) FROM reactions) AS reactions,
+                (SELECT COUNT(*) FROM contacts) AS contacts,
+                (SELECT COUNT(*) FROM contact_points) AS contact_points,
+                (
+                    SELECT COUNT(*)
+                    FROM chat_contact_matches
+                    WHERE status = 'matched'
+                ) AS matched_chats,
+                (
+                    SELECT COUNT(DISTINCT chat_id)
+                    FROM chat_contact_matches
+                    WHERE status = 'ambiguous'
+                ) AS ambiguous_chats,
+                (
+                    SELECT COUNT(*)
+                    FROM chat_contact_matches
+                    WHERE status = 'unresolved'
+                ) AS unresolved_chats
+            """
+        ).fetchone()
+        keys = row.keys()
+        return {key: int(row[key]) for key in keys}
+
+    def recent_chats(self, *, limit: int = 20) -> list[ArchiveRow]:
+        rows = self._db.execute(
+            """
+            SELECT
+                c.id AS chat_id,
+                c.name AS name,
+                c.identifier AS identifier,
+                c.service AS service,
+                COUNT(m.rowid) AS messages,
+                MAX(m.date) AS last_message_at,
+                (
+                    SELECT sender
+                    FROM messages latest
+                    WHERE latest.chat_id = c.id
+                    ORDER BY latest.date DESC, latest.rowid DESC
+                    LIMIT 1
+                ) AS last_sender,
+                (
+                    SELECT text
+                    FROM messages latest
+                    WHERE latest.chat_id = c.id
+                    ORDER BY latest.date DESC, latest.rowid DESC
+                    LIMIT 1
+                ) AS last_text,
+                (
+                    SELECT GROUP_CONCAT(full_name, ', ')
+                    FROM (
+                        SELECT DISTINCT contacts.full_name AS full_name
+                        FROM chat_contact_matches matches
+                        JOIN contacts ON contacts.contact_id = matches.contact_id
+                        WHERE matches.chat_id = c.id
+                            AND matches.status = 'matched'
+                            AND contacts.full_name != ''
+                        ORDER BY contacts.full_name
+                    )
+                ) AS contacts
+            FROM chats c
+            LEFT JOIN messages m ON m.chat_id = c.id
+            GROUP BY c.id
+            ORDER BY COALESCE(MAX(m.date), c.last_message_at) DESC, c.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def needs_reply(self, *, limit: int = 50) -> list[ArchiveRow]:
+        rows = self._db.execute(
+            """
+            WITH latest_messages AS (
+                SELECT
+                    m.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY m.chat_id
+                        ORDER BY m.date DESC, m.rowid DESC
+                    ) AS rank
+                FROM messages m
+            )
+            SELECT
+                c.id AS chat_id,
+                c.name AS name,
+                c.identifier AS identifier,
+                latest_messages.sender AS sender,
+                latest_messages.date AS last_message_at,
+                latest_messages.text AS last_text,
+                (
+                    SELECT GROUP_CONCAT(full_name, ', ')
+                    FROM (
+                        SELECT DISTINCT contacts.full_name AS full_name
+                        FROM chat_contact_matches matches
+                        JOIN contacts ON contacts.contact_id = matches.contact_id
+                        WHERE matches.chat_id = c.id
+                            AND matches.status = 'matched'
+                            AND contacts.full_name != ''
+                        ORDER BY contacts.full_name
+                    )
+                ) AS contacts
+            FROM latest_messages
+            JOIN chats c ON c.id = latest_messages.chat_id
+            WHERE latest_messages.rank = 1
+                AND latest_messages.is_from_me = 0
+                AND latest_messages.is_reaction = 0
+            ORDER BY latest_messages.date DESC, latest_messages.rowid DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def unresolved_contact_chats(self, *, limit: int = 50) -> list[ArchiveRow]:
+        rows = self._db.execute(
+            """
+            SELECT
+                c.id AS chat_id,
+                c.name AS name,
+                c.identifier AS identifier,
+                matches.source_identifier AS source_identifier,
+                matches.matched_value AS normalized_value,
+                matches.updated_at AS updated_at
+            FROM chat_contact_matches matches
+            JOIN chats c ON c.id = matches.chat_id
+            WHERE matches.status = 'unresolved'
+            ORDER BY c.last_message_at DESC, c.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def attachment_issues(self, *, limit: int = 50) -> list[ArchiveRow]:
+        rows = self._db.execute(
+            """
+            SELECT
+                attachments.message_rowid AS message_rowid,
+                messages.chat_id AS chat_id,
+                chats.name AS chat_name,
+                messages.date AS message_at,
+                attachments.position AS position,
+                attachments.transfer_name AS transfer_name,
+                attachments.original_path AS original_path,
+                attachments.missing AS missing,
+                attachments.archived AS archived,
+                attachments.archive_error AS archive_error
+            FROM attachments
+            JOIN messages ON messages.rowid = attachments.message_rowid
+            JOIN chats ON chats.id = messages.chat_id
+            WHERE attachments.archived = 0
+                OR attachments.missing = 1
+                OR attachments.archive_error != ''
+            ORDER BY messages.date DESC, attachments.message_rowid DESC, attachments.position
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
     def replace_contacts(self, contacts: list[ContactRecord]) -> ContactsSyncResult:
         now = _fmt_dt(datetime.now(UTC))
         with self._db:
@@ -585,6 +759,11 @@ class IMessageArchive:
         for item in parsed:
             if isinstance(item, str):
                 cls._add_identifier(values, item)
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> ArchiveRow:
+        keys = row.keys()
+        return {key: row[key] for key in keys}
 
     def _ensure_chat_for_message(self, message: Message, now: str) -> None:
         self._db.execute(

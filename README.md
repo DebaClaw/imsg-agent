@@ -18,6 +18,8 @@ database.
   `~/Library/Messages/chat.db` in this package.
 - **Local SQLite archive**: `imsg-archive` stores chats, messages, attachment metadata,
   reactions, and a live cursor in `~/imsg-data/imessage.sqlite`.
+- **Archive visibility CLI**: read-only commands show archive totals, recent chats,
+  unanswered inbound conversations, unresolved contact matches, and attachment issues.
 - **No-GenAI archive mode**: archive backfill and monitoring do not import or call the
   drafting system or any model API.
 - **Human-readable data store**: inbox items, chat context, history, drafts, outbox,
@@ -57,6 +59,7 @@ agent/
 
 config/imsg.json  Default local configuration
 scripts/setup.sh  Environment and data-directory setup
+scripts/install_launchd.sh  Install a user LaunchAgent for archive monitoring
 tests/            Unit tests with fixtures, no live Messages database required
 ```
 
@@ -171,6 +174,28 @@ Only monitor new messages using the saved cursor:
 uv run imsg-archive monitor
 ```
 
+Install a persistent user LaunchAgent for monitoring:
+
+```bash
+cd ~/src/imsg-agent
+bash scripts/install_launchd.sh
+```
+
+That installs `com.imsg-agent.archive-monitor` and runs `uv run imsg-archive monitor`
+with attachments enabled. Inspect it with:
+
+```bash
+launchctl print gui/$(id -u)/com.imsg-agent.archive-monitor
+tail -f ~/imsg-data/logs/imsg-archive-monitor.log
+tail -f ~/imsg-data/logs/imsg-archive-monitor.err.log
+```
+
+Stop it with:
+
+```bash
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.imsg-agent.archive-monitor.plist
+```
+
 Fetch attachment metadata and copy available attachment files for archived messages:
 
 ```bash
@@ -202,6 +227,12 @@ uv run imsg-archive contacts sync --contacts-command "bun /Users/zob/src/contact
 uv run imsg-archive contacts enrich --default-country US
 uv run imsg-archive monitor --db ~/imsg-data/imessage.sqlite
 uv run imsg-archive monitor --since-rowid 12345
+uv run imsg-archive stats
+uv run imsg-archive recent --limit 25
+uv run imsg-archive needs-reply --limit 50
+uv run imsg-archive unresolved --limit 50
+uv run imsg-archive attachment-issues --limit 50
+uv run imsg-archive needs-reply --json
 ```
 
 Backfill pages each chat's history using `--history-page-size` so large chats do not need
@@ -219,6 +250,10 @@ Use `--no-attachments` as a diagnostic/degraded mode when `messages.history` res
 quickly without attachment metadata but stalls while expanding attachments or reactions.
 That mode still archives chats and messages, but `attachments` and `reactions` tables
 will not be populated for those fetched messages.
+For live monitoring, the difference is the same: with attachments enabled, new messages
+are enriched with attachment/reaction metadata and available files are copied immediately;
+with `--no-attachments`, the monitor writes message rows faster but leaves attachment and
+reaction detail for a later `imsg-archive attachments` pass.
 Run `imsg-archive attachments` after a fast `--no-attachments` backfill to enrich the
 archive with attachment metadata and copy files into `~/imsg-data/attachments/`. The
 attachment pass uses the same timeout backoff behavior as message backfill.
@@ -227,15 +262,19 @@ Run `imsg-archive contacts sync` after syncing/exporting Contacts through
 chat/contact matches. Exact normalized phone and email matches are linked automatically.
 Ambiguous and unresolved identifiers are recorded in `chat_contact_matches` for review.
 
-For a persistent macOS process, run the monitor under your preferred supervisor
-(`launchd`, `tmux`, `screen`, or a terminal session you keep open). Example:
+For a scriptable archive dashboard, use the read-only commands:
 
 ```bash
-cd ~/src/imsg-agent
-uv run imsg-archive run
+uv run imsg-archive stats
+uv run imsg-archive recent --limit 25
+uv run imsg-archive needs-reply --limit 50
+uv run imsg-archive unresolved --limit 50
+uv run imsg-archive attachment-issues --limit 50
 ```
 
-Inspect counts with SQLite:
+Add `--json` to use the output from other scripts.
+
+You can also inspect counts directly with SQLite:
 
 ```bash
 sqlite3 ~/imsg-data/imessage.sqlite \

@@ -167,6 +167,45 @@ concurrent agents, and reliability guarantees.
 
 ---
 
+## Phase 6 — Operations: Visibility, Management, and Interfaces
+
+**Goal:** Make the no-AI archive operationally useful on its own, then layer management
+interfaces and AI workflows on top without making the archive depend on AI.
+
+**Exit criteria:**
+- The archive monitor can run persistently under `launchd`
+- The operator can answer "what needs attention?" from CLI commands alone
+- TUI and web plans preserve the same SQLite/archive source of truth
+- AI actions remain explicit higher-level commands that read from the archive and write
+  reviewable artifacts instead of mutating messages invisibly
+
+### Tasks
+
+#### No-AI Operations
+- ✅ `scripts/install_launchd.sh` — install a user LaunchAgent for `imsg-archive monitor`
+- ✅ `imsg-archive stats` — archive totals for chats, messages, contacts, attachments
+- ✅ `imsg-archive recent` — recently active chats with last message preview
+- ✅ `imsg-archive needs-reply` — chats where the latest archived message is inbound
+- ✅ `imsg-archive unresolved` — contact match gaps for review
+- ✅ `imsg-archive attachment-issues` — attachments that were not copied locally
+- ⬜ Incremental Contacts enrichment during monitor or scheduled maintenance
+- ⬜ Resumable attachment repair state for large attachment recovery jobs
+
+#### Management Interfaces
+- ⬜ TUI dashboard for communications awareness and triage
+- ⬜ Local web interface for archive browsing and communication management
+- ⬜ Shared read-only service/query layer for CLI, TUI, and web
+- ⬜ Saved views: unanswered, recently active, quiet relationships, attachment issues
+
+#### AI Action Layer
+- ⬜ Explicit AI triage command for ambiguous/unresolved conversations
+- ⬜ AI summaries from archive data with per-chat isolation controls
+- ⬜ AI draft generation from archived context with manual approval by default
+- ⬜ "Do the needful" workflow that produces reviewable actions, drafts, and rationale
+- ⬜ Policy gates for autonomous action by relationship, chat type, and professional status
+
+---
+
 ## Ongoing / Cross-cutting
 
 - ⬜ CI: GitHub Actions running `pytest` on every push (no live DB, fixtures only)

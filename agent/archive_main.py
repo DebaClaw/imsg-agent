@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -21,6 +22,7 @@ from .contact_enrichment import contacts_from_json, load_contacts_from_contacts_
 from .rpc_client import IMsgRPCClient
 
 logger = logging.getLogger(__name__)
+Column = tuple[str, str]
 
 
 def archive_db_path(config: Config) -> Path:
@@ -123,6 +125,105 @@ def run_contacts_enrich(args: argparse.Namespace) -> None:
         archive.close()
 
 
+def run_stats(args: argparse.Namespace) -> None:
+    config = load_config()
+    archive = IMessageArchive(Path(args.db or archive_db_path(config)))
+    try:
+        stats = archive.archive_stats()
+        if args.json_output:
+            print(json.dumps(stats, indent=2, sort_keys=True))
+            return
+        for key, value in stats.items():
+            print(f"{key}: {value}")
+    finally:
+        archive.close()
+
+
+def run_recent(args: argparse.Namespace) -> None:
+    config = load_config()
+    archive = IMessageArchive(Path(args.db or archive_db_path(config)))
+    try:
+        rows = archive.recent_chats(limit=args.limit)
+        _print_rows(
+            rows,
+            [
+                ("chat_id", "chat"),
+                ("last_message_at", "last_message_at"),
+                ("messages", "messages"),
+                ("name", "name"),
+                ("contacts", "contacts"),
+                ("last_sender", "last_sender"),
+                ("last_text", "last_text"),
+            ],
+            json_output=args.json_output,
+        )
+    finally:
+        archive.close()
+
+
+def run_needs_reply(args: argparse.Namespace) -> None:
+    config = load_config()
+    archive = IMessageArchive(Path(args.db or archive_db_path(config)))
+    try:
+        rows = archive.needs_reply(limit=args.limit)
+        _print_rows(
+            rows,
+            [
+                ("chat_id", "chat"),
+                ("last_message_at", "last_message_at"),
+                ("name", "name"),
+                ("contacts", "contacts"),
+                ("sender", "sender"),
+                ("last_text", "last_text"),
+            ],
+            json_output=args.json_output,
+        )
+    finally:
+        archive.close()
+
+
+def run_unresolved(args: argparse.Namespace) -> None:
+    config = load_config()
+    archive = IMessageArchive(Path(args.db or archive_db_path(config)))
+    try:
+        rows = archive.unresolved_contact_chats(limit=args.limit)
+        _print_rows(
+            rows,
+            [
+                ("chat_id", "chat"),
+                ("name", "name"),
+                ("source_identifier", "source_identifier"),
+                ("normalized_value", "normalized_value"),
+                ("updated_at", "updated_at"),
+            ],
+            json_output=args.json_output,
+        )
+    finally:
+        archive.close()
+
+
+def run_attachment_issues(args: argparse.Namespace) -> None:
+    config = load_config()
+    archive = IMessageArchive(Path(args.db or archive_db_path(config)))
+    try:
+        rows = archive.attachment_issues(limit=args.limit)
+        _print_rows(
+            rows,
+            [
+                ("message_rowid", "message"),
+                ("chat_id", "chat"),
+                ("message_at", "message_at"),
+                ("chat_name", "chat_name"),
+                ("position", "position"),
+                ("transfer_name", "transfer_name"),
+                ("archive_error", "archive_error"),
+            ],
+            json_output=args.json_output,
+        )
+    finally:
+        archive.close()
+
+
 async def run_monitor(args: argparse.Namespace) -> None:
     config = load_config()
     archive = IMessageArchive(Path(args.db or archive_db_path(config)))
@@ -159,6 +260,37 @@ async def run_monitor(args: argparse.Namespace) -> None:
 async def run_forever(args: argparse.Namespace) -> None:
     await run_backfill(args)
     await run_monitor(args)
+
+
+def _stringify(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).replace("\n", " ").strip()
+    if len(text) > 96:
+        return f"{text[:93]}..."
+    return text
+
+
+def _print_rows(
+    rows: list[dict[str, object]],
+    columns: list[Column],
+    *,
+    json_output: bool,
+) -> None:
+    if json_output:
+        print(json.dumps(rows, indent=2, sort_keys=True))
+        return
+    if not rows:
+        print("(none)")
+        return
+    widths = {
+        key: max(len(label), *(len(_stringify(row.get(key))) for row in rows))
+        for key, label in columns
+    }
+    print("  ".join(label.ljust(widths[key]) for key, label in columns))
+    print("  ".join("-" * widths[key] for key, _label in columns))
+    for row in rows:
+        print("  ".join(_stringify(row.get(key)).ljust(widths[key]) for key, _ in columns))
 
 
 def _add_options(
@@ -201,6 +333,16 @@ def _add_options(
     )
 
 
+def _add_read_only_options(parser: argparse.ArgumentParser) -> None:
+    _add_options(parser, defaults=False)
+    parser.add_argument("--json", action="store_true", dest="json_output")
+
+
+def _add_limited_read_only_options(parser: argparse.ArgumentParser) -> None:
+    _add_read_only_options(parser)
+    parser.add_argument("--limit", type=int, default=50)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Archive iMessage chats and messages to local SQLite without GenAI."
@@ -224,8 +366,25 @@ def _parser() -> argparse.ArgumentParser:
         help="Sync Contacts data and enrich archived chats",
     )
     run = subparsers.add_parser("run", help="Backfill once, then monitor")
+    stats = subparsers.add_parser("stats", help="Show archive totals")
+    recent = subparsers.add_parser("recent", help="List recently active chats")
+    needs_reply = subparsers.add_parser(
+        "needs-reply",
+        help="List chats where the latest archived message is inbound",
+    )
+    unresolved = subparsers.add_parser(
+        "unresolved",
+        help="List chat identifiers not matched to Contacts",
+    )
+    attachment_issues = subparsers.add_parser(
+        "attachment-issues",
+        help="List attachments that were not saved locally",
+    )
     for subparser in (backfill, monitor, attachments, run):
         _add_options(subparser, defaults=False)
+    _add_read_only_options(stats)
+    for subparser in (recent, needs_reply, unresolved, attachment_issues):
+        _add_limited_read_only_options(subparser)
     contacts_subparsers = contacts.add_subparsers(
         dest="contacts_command_name",
         required=True,
@@ -289,6 +448,16 @@ def cli() -> None:
         asyncio.run(run_monitor(args))
     elif args.command == "run":
         asyncio.run(run_forever(args))
+    elif args.command == "stats":
+        run_stats(args)
+    elif args.command == "recent":
+        run_recent(args)
+    elif args.command == "needs-reply":
+        run_needs_reply(args)
+    elif args.command == "unresolved":
+        run_unresolved(args)
+    elif args.command == "attachment-issues":
+        run_attachment_issues(args)
 
 
 if __name__ == "__main__":

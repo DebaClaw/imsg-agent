@@ -210,3 +210,66 @@ def test_archive_records_ambiguous_and_unresolved_contact_matches(tmp_path: Path
     assert archive.count_chat_contact_matches("ambiguous") == 2
     assert archive.count_chat_contact_matches("unresolved") == 1
     archive.close()
+
+
+def test_archive_reports_stats_and_needs_reply(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    inbound = _message(rowid=123)
+    sent = _message(rowid=124)
+    sent.is_from_me = True
+    sent.sender = "me"
+    sent.text = "Already answered"
+    sent.date = datetime(2026, 4, 25, 12, 5, 0, tzinfo=UTC)
+    archive.upsert_message(inbound)
+    archive.upsert_message(sent)
+
+    archive.upsert_chat(
+        Chat(
+            id=8,
+            identifier="iMessage;-;+15551234567",
+            name="Needs Reply",
+            service="iMessage",
+            last_message_at=NOW,
+            participants=["+15551234567"],
+        )
+    )
+    pending = _message(rowid=200)
+    pending.chat_id = 8
+    pending.chat_identifier = "iMessage;-;+15551234567"
+    pending.chat_name = "Needs Reply"
+    pending.sender = "+15551234567"
+    pending.text = "Can you look at this?"
+    pending.date = datetime(2026, 4, 25, 13, 0, 0, tzinfo=UTC)
+    pending.participants = ["+15551234567"]
+    archive.upsert_message(pending)
+
+    stats = archive.archive_stats()
+    needs_reply = archive.needs_reply()
+    recent = archive.recent_chats()
+
+    assert stats["chats"] == 2
+    assert stats["messages"] == 3
+    assert stats["attachments"] == 3
+    assert len(needs_reply) == 1
+    assert needs_reply[0]["chat_id"] == 8
+    assert needs_reply[0]["last_text"] == "Can you look at this?"
+    assert recent[0]["chat_id"] == 8
+    archive.close()
+
+
+def test_archive_reports_unresolved_and_attachment_issues(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    archive.upsert_message(_message())
+    archive.enrich_chat_contacts()
+
+    unresolved = archive.unresolved_contact_chats()
+    issues = archive.attachment_issues()
+
+    assert len(unresolved) == 1
+    assert unresolved[0]["chat_id"] == 7
+    assert len(issues) == 1
+    assert issues[0]["message_rowid"] == 123
+    assert issues[0]["archive_error"] != ""
+    archive.close()
