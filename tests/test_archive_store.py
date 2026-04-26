@@ -94,3 +94,20 @@ def test_archive_upsert_is_idempotent(tmp_path: Path) -> None:
     assert archive.count_messages() == 1
     assert archive.count_attachments() == 1
     archive.close()
+
+
+def test_archive_reports_oldest_message_for_chat(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    newer = _message(rowid=200)
+    older = _message(rowid=100)
+    older.date = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
+
+    archive.upsert_message(newer)
+    archive.upsert_message(older)
+
+    oldest = archive.oldest_message_for_chat(7)
+
+    assert archive.count_messages_for_chat(7) == 2
+    assert oldest == (100, older.date)
+    assert archive.oldest_message_for_chat(999) is None
+    archive.close()

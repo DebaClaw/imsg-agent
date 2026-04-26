@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -181,6 +181,45 @@ async def test_backfill_pages_large_chat_history(tmp_path: Path) -> None:
     assert rpc.history_limits == [2, 2]
     assert rpc.history_ends[0] is None
     assert rpc.history_ends[1] is not None
+    archive.close()
+
+
+@pytest.mark.asyncio
+async def test_backfill_resumes_below_oldest_archived_message(tmp_path: Path) -> None:
+    class ResumeRPC(FakeRPC):
+        async def list_chats(self, limit: int = 20) -> list[Chat]:
+            return [_chat(7)]
+
+        async def get_history(
+            self,
+            chat_id: int,
+            limit: int = 50,
+            participants: list[str] | None = None,
+            start: str | None = None,
+            end: str | None = None,
+            include_attachments: bool = False,
+        ) -> list[Message]:
+            self.history_ends.append(end)
+            if end is None:
+                return [_message(rowid=99, chat_id=chat_id)]
+            message = _message(rowid=1, chat_id=chat_id)
+            message.date = NOW - timedelta(days=1)
+            return [message]
+
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    newest = _message(rowid=100, chat_id=7)
+    newest.date = NOW
+    archive.upsert_message(newest)
+    rpc = ResumeRPC()
+
+    chats, messages = await IMessageArchiver(archive, rpc).backfill(history_limit=1)
+
+    assert chats == 1
+    assert messages == 1
+    assert archive.count_messages_for_chat(7) == 2
+    assert rpc.history_ends == [
+        (newest.date - timedelta(microseconds=1)).isoformat()
+    ]
     archive.close()
 
 

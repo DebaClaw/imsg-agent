@@ -112,7 +112,22 @@ class IMessageArchiver:
         debug: bool,
     ) -> int:
         total = 0
+        already_archived = self._archive.count_messages_for_chat(chat_id)
+        resume_from = self._archive.oldest_message_for_chat(chat_id)
         end: str | None = None
+        if resume_from is not None:
+            oldest_rowid, oldest_date = resume_from
+            end = (oldest_date - timedelta(microseconds=1)).isoformat()
+            logger.info(
+                "Resuming chat_id=%d name=%r below oldest archived message "
+                "rowid=%d date=%s archived_messages=%d next_end=%s",
+                chat_id,
+                chat_name,
+                oldest_rowid,
+                oldest_date.isoformat(),
+                already_archived,
+                end,
+            )
         seen_oldest: tuple[int, str] | None = None
         page_size = max(1, history_page_size)
         current_page_size = page_size

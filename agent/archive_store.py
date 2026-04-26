@@ -20,6 +20,10 @@ def _fmt_dt(dt: datetime) -> str:
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
+def _parse_dt(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
 class IMessageArchive:
     def __init__(self, db_path: Path) -> None:
         self.path = Path(db_path).expanduser().resolve()
@@ -243,6 +247,28 @@ class IMessageArchive:
     def count_messages(self) -> int:
         row = self._db.execute("SELECT COUNT(*) AS count FROM messages").fetchone()
         return int(row["count"])
+
+    def count_messages_for_chat(self, chat_id: int) -> int:
+        row = self._db.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE chat_id = ?",
+            (chat_id,),
+        ).fetchone()
+        return int(row["count"])
+
+    def oldest_message_for_chat(self, chat_id: int) -> tuple[int, datetime] | None:
+        row = self._db.execute(
+            """
+            SELECT rowid, date
+            FROM messages
+            WHERE chat_id = ?
+            ORDER BY date ASC, rowid ASC
+            LIMIT 1
+            """,
+            (chat_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return int(row["rowid"]), _parse_dt(str(row["date"]))
 
     def count_attachments(self) -> int:
         row = self._db.execute("SELECT COUNT(*) AS count FROM attachments").fetchone()
