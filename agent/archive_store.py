@@ -7,13 +7,24 @@ of iMessage data received through `imsg rpc`.
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .models import Attachment, Chat, Message, Reaction
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+@dataclass(frozen=True)
+class _CopiedAttachment:
+    local_path: str
+    archived: bool
+    error: str
 
 
 def _fmt_dt(dt: datetime) -> str:
@@ -22,6 +33,12 @@ def _fmt_dt(dt: datetime) -> str:
 
 def _parse_dt(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _safe_filename(value: str, fallback: str) -> str:
+    candidate = Path(value).name if value else fallback
+    cleaned = SAFE_FILENAME_RE.sub("_", candidate).strip("._")
+    return cleaned or fallback
 
 
 class IMessageArchive:
@@ -93,6 +110,9 @@ class IMessageArchive:
                 total_bytes INTEGER NOT NULL DEFAULT 0,
                 is_sticker INTEGER NOT NULL DEFAULT 0,
                 original_path TEXT NOT NULL DEFAULT '',
+                local_path TEXT NOT NULL DEFAULT '',
+                archived INTEGER NOT NULL DEFAULT 0,
+                archive_error TEXT NOT NULL DEFAULT '',
                 missing INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (message_rowid) REFERENCES messages(rowid) ON DELETE CASCADE,
@@ -118,8 +138,16 @@ class IMessageArchive:
             CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_rowid);
             """
         )
+        self._ensure_column("attachments", "local_path", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column("attachments", "archived", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("attachments", "archive_error", "TEXT NOT NULL DEFAULT ''")
         self.set_meta("schema_version", str(SCHEMA_VERSION))
         self._db.commit()
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        rows = self._db.execute(f"PRAGMA table_info({table})").fetchall()
+        if column not in {str(row["name"]) for row in rows}:
+            self._db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def set_meta(self, key: str, value: str) -> None:
         self._db.execute(
@@ -274,6 +302,12 @@ class IMessageArchive:
         row = self._db.execute("SELECT COUNT(*) AS count FROM attachments").fetchone()
         return int(row["count"])
 
+    def count_saved_attachments(self) -> int:
+        row = self._db.execute(
+            "SELECT COUNT(*) AS count FROM attachments WHERE archived = 1"
+        ).fetchone()
+        return int(row["count"])
+
     def _ensure_chat_for_message(self, message: Message, now: str) -> None:
         self._db.execute(
             """
@@ -324,9 +358,10 @@ class IMessageArchive:
             """
             INSERT INTO attachments(
                 message_rowid, position, filename, transfer_name, uti, mime_type,
-                total_bytes, is_sticker, original_path, missing, updated_at
+                total_bytes, is_sticker, original_path, local_path, archived,
+                archive_error, missing, updated_at
             )
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -339,11 +374,58 @@ class IMessageArchive:
                     attachment.total_bytes,
                     int(attachment.is_sticker),
                     attachment.original_path,
+                    copied.local_path,
+                    int(copied.archived),
+                    copied.error,
                     int(attachment.missing),
                     updated_at,
                 )
                 for idx, attachment in enumerate(attachments)
+                for copied in [self._copy_attachment(message_rowid, idx, attachment)]
             ],
+        )
+
+    def _copy_attachment(
+        self,
+        message_rowid: int,
+        position: int,
+        attachment: Attachment,
+    ) -> _CopiedAttachment:
+        source_text = attachment.original_path or attachment.filename
+        if attachment.missing or not source_text:
+            return _CopiedAttachment(local_path="", archived=False, error="missing")
+
+        source = Path(source_text).expanduser()
+        if not source.exists():
+            return _CopiedAttachment(
+                local_path="",
+                archived=False,
+                error=f"source not found: {source}",
+            )
+        if not source.is_file():
+            return _CopiedAttachment(
+                local_path="",
+                archived=False,
+                error=f"source is not a file: {source}",
+            )
+
+        name_source = attachment.transfer_name or attachment.filename or source.name
+        filename = _safe_filename(name_source, f"attachment-{position}")
+        destination_dir = self.path.parent / "attachments" / str(message_rowid)
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        destination = destination_dir / f"{position:03d}-{filename}"
+        try:
+            shutil.copy2(source, destination)
+        except OSError as exc:
+            return _CopiedAttachment(
+                local_path="",
+                archived=False,
+                error=str(exc),
+            )
+        return _CopiedAttachment(
+            local_path=str(destination),
+            archived=True,
+            error="",
         )
 
     def _replace_reactions(

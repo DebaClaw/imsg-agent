@@ -57,6 +57,35 @@ async def run_backfill(args: argparse.Namespace) -> None:
         archive.close()
 
 
+async def run_attachments(args: argparse.Namespace) -> None:
+    config = load_config()
+    archive = IMessageArchive(Path(args.db or archive_db_path(config)))
+    rpc = IMsgRPCClient(
+        config.imsg_binary,
+        timeout=float(config.rpc_timeout_seconds),
+        read_limit=config.rpc_read_limit_bytes,
+    )
+    await rpc.start()
+    try:
+        chats, messages = await IMessageArchiver(archive, rpc).save_attachments(
+            chat_limit=args.chat_limit,
+            history_limit=args.history_limit,
+            history_page_size=args.history_page_size,
+            debug=args.debug,
+        )
+        logger.info(
+            "Attachment save complete chats=%d scanned_messages=%d "
+            "attachments=%d saved_attachments=%d",
+            chats,
+            messages,
+            archive.count_attachments(),
+            archive.count_saved_attachments(),
+        )
+    finally:
+        await rpc.stop()
+        archive.close()
+
+
 async def run_monitor(args: argparse.Namespace) -> None:
     config = load_config()
     archive = IMessageArchive(Path(args.db or archive_db_path(config)))
@@ -149,8 +178,12 @@ def _parser() -> argparse.ArgumentParser:
         "monitor",
         help="Watch new messages and append them to SQLite",
     )
+    attachments = subparsers.add_parser(
+        "attachments",
+        help="Fetch attachment metadata and copy available attachment files locally",
+    )
     run = subparsers.add_parser("run", help="Backfill once, then monitor")
-    for subparser in (backfill, monitor, run):
+    for subparser in (backfill, monitor, attachments, run):
         _add_options(subparser, defaults=False)
     return parser
 
@@ -167,6 +200,8 @@ def cli() -> None:
     )
     if args.command == "backfill":
         asyncio.run(run_backfill(args))
+    elif args.command == "attachments":
+        asyncio.run(run_attachments(args))
     elif args.command == "monitor":
         asyncio.run(run_monitor(args))
     elif args.command == "run":

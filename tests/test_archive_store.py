@@ -79,6 +79,8 @@ def test_archive_upserts_chat_message_attachment_and_reaction(tmp_path: Path) ->
 
     assert attachment["transfer_name"] == "photo.jpg"
     assert attachment["original_path"].endswith("photo.jpg")
+    assert attachment["archived"] == 0
+    assert attachment["local_path"] == ""
     assert reaction["reaction_type"] == "like"
     archive.close()
     db.close()
@@ -94,6 +96,31 @@ def test_archive_upsert_is_idempotent(tmp_path: Path) -> None:
     assert archive.count_messages() == 1
     assert archive.count_attachments() == 1
     archive.close()
+
+
+def test_archive_copies_attachment_file(tmp_path: Path) -> None:
+    source = tmp_path / "source image.jpg"
+    source.write_bytes(b"image-data")
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    message = _message()
+    message.attachments[0].original_path = str(source)
+    message.attachments[0].transfer_name = "source image.jpg"
+
+    archive.upsert_message(message)
+
+    db = sqlite3.connect(archive.path)
+    db.row_factory = sqlite3.Row
+    attachment = db.execute("SELECT * FROM attachments").fetchone()
+    local_path = Path(str(attachment["local_path"]))
+
+    assert archive.count_saved_attachments() == 1
+    assert attachment["archived"] == 1
+    assert attachment["archive_error"] == ""
+    assert local_path.exists()
+    assert local_path.read_bytes() == b"image-data"
+    assert local_path.parent == tmp_path / "attachments" / str(message.rowid)
+    archive.close()
+    db.close()
 
 
 def test_archive_reports_oldest_message_for_chat(tmp_path: Path) -> None:

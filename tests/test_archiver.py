@@ -304,6 +304,48 @@ async def test_backfill_keeps_reduced_page_size_after_timeout(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_save_attachments_scans_with_attachment_metadata(tmp_path: Path) -> None:
+    source = tmp_path / "photo.jpg"
+    source.write_bytes(b"photo")
+
+    class AttachmentRPC(FakeRPC):
+        async def list_chats(self, limit: int = 20) -> list[Chat]:
+            return [_chat(7)]
+
+        async def get_history(
+            self,
+            chat_id: int,
+            limit: int = 50,
+            participants: list[str] | None = None,
+            start: str | None = None,
+            end: str | None = None,
+            include_attachments: bool = False,
+        ) -> list[Message]:
+            self.history_include_attachments.append(include_attachments)
+            self.history_limits.append(limit)
+            if end is not None:
+                return []
+            message = _message(rowid=1, chat_id=chat_id)
+            message.attachments[0].original_path = str(source)
+            return [message]
+
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    rpc = AttachmentRPC()
+
+    chats, messages = await IMessageArchiver(archive, rpc).save_attachments(
+        history_page_size=10,
+    )
+
+    assert chats == 1
+    assert messages == 1
+    assert archive.count_attachments() == 1
+    assert archive.count_saved_attachments() == 1
+    assert rpc.history_include_attachments == [True]
+    assert rpc.history_limits == [10]
+    archive.close()
+
+
+@pytest.mark.asyncio
 async def test_backfill_skips_page_after_single_message_timeout(tmp_path: Path) -> None:
     class AlwaysTimeoutRPC(FakeRPC):
         async def list_chats(self, limit: int = 20) -> list[Chat]:

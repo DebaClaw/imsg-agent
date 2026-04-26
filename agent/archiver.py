@@ -101,6 +101,185 @@ class IMessageArchiver:
         )
         return len(chats), message_count
 
+    async def save_attachments(
+        self,
+        *,
+        chat_limit: int = 10_000,
+        history_limit: int = 100_000,
+        history_page_size: int = 100,
+        debug: bool = False,
+    ) -> tuple[int, int]:
+        """Fetch attachment metadata for archived chats and copy files locally."""
+        started = monotonic()
+        logger.info(
+            "Starting attachment save pass chat_limit=%d history_limit=%d "
+            "history_page_size=%d",
+            chat_limit,
+            history_limit,
+            history_page_size,
+        )
+        chats = await self._rpc.list_chats(limit=chat_limit)
+        logger.info("Found %d chats for attachment save pass", len(chats))
+        message_count = 0
+        for idx, chat in enumerate(chats, start=1):
+            chat_started = monotonic()
+            self._archive.upsert_chat(chat)
+            logger.info(
+                "Starting attachment chat %d/%d chat_id=%d name=%r identifier=%r",
+                idx,
+                len(chats),
+                chat.id,
+                chat.name,
+                chat.identifier,
+            )
+            scanned = await self._save_chat_attachments(
+                chat_name=chat.name,
+                chat_id=chat.id,
+                history_limit=history_limit,
+                history_page_size=history_page_size,
+                debug=debug,
+            )
+            message_count += scanned
+            logger.info(
+                "Finished attachment chat_id=%d scanned_messages=%d "
+                "total_scanned=%d saved_attachments=%d elapsed=%.2fs",
+                chat.id,
+                scanned,
+                message_count,
+                self._archive.count_saved_attachments(),
+                monotonic() - chat_started,
+            )
+        logger.info(
+            "Attachment save pass finished chats=%d scanned_messages=%d "
+            "attachments=%d saved_attachments=%d elapsed=%.2fs",
+            len(chats),
+            message_count,
+            self._archive.count_attachments(),
+            self._archive.count_saved_attachments(),
+            monotonic() - started,
+        )
+        return len(chats), message_count
+
+    async def _save_chat_attachments(
+        self,
+        *,
+        chat_name: str,
+        chat_id: int,
+        history_limit: int,
+        history_page_size: int,
+        debug: bool,
+    ) -> int:
+        total = 0
+        end: str | None = None
+        seen_oldest: tuple[int, str] | None = None
+        page_size = max(1, history_page_size)
+        current_page_size = page_size
+        page_number = 0
+
+        while total < history_limit:
+            limit = min(current_page_size, history_limit - total)
+            page_number += 1
+            request_started = monotonic()
+            logger.info(
+                "Fetching attachments chat_id=%d name=%r page=%d limit=%d "
+                "end=%s total_for_chat=%d",
+                chat_id,
+                chat_name,
+                page_number,
+                limit,
+                end,
+                total,
+            )
+            try:
+                messages = await self._fetch_history_page(
+                    chat_id=chat_id,
+                    limit=limit,
+                    end=end,
+                    include_attachments=True,
+                )
+            except IMsgRPCConnectionError:
+                elapsed = monotonic() - request_started
+                current_page_size = max(1, limit // 2)
+                page_size = min(page_size, current_page_size)
+                if limit > 1:
+                    logger.warning(
+                        "Timed out fetching attachments chat_id=%d name=%r page=%d "
+                        "page_size=%d end=%s elapsed=%.2fs; lowering max page size to %d",
+                        chat_id,
+                        chat_name,
+                        page_number,
+                        limit,
+                        end,
+                        elapsed,
+                        current_page_size,
+                    )
+                    continue
+                logger.exception(
+                    "Skipping remaining attachment pages for chat_id=%d name=%r "
+                    "after timeout at page_size=1 end=%s",
+                    chat_id,
+                    chat_name,
+                    end,
+                )
+                break
+
+            elapsed = monotonic() - request_started
+            if not messages:
+                logger.info(
+                    "No more attachment pages chat_id=%d name=%r page=%d elapsed=%.2fs",
+                    chat_id,
+                    chat_name,
+                    page_number,
+                    elapsed,
+                )
+                break
+
+            for message in messages:
+                self._archive.upsert_message(message)
+            total += len(messages)
+            current_page_size = page_size
+
+            oldest = min(messages, key=lambda message: (message.date, message.rowid))
+            newest = max(messages, key=lambda message: (message.date, message.rowid))
+            oldest_key = (oldest.rowid, oldest.date.isoformat())
+            if oldest_key == seen_oldest:
+                logger.warning(
+                    "Stopping attachment pass chat_id=%d name=%r because pagination "
+                    "did not advance oldest_rowid=%d oldest_date=%s",
+                    chat_id,
+                    chat_name,
+                    oldest.rowid,
+                    oldest.date.isoformat(),
+                )
+                break
+            seen_oldest = oldest_key
+            end = (oldest.date - timedelta(microseconds=1)).isoformat()
+
+            log = logger.info if debug else logger.debug
+            log(
+                "Saved attachment page chat_id=%d name=%r page=%d messages=%d "
+                "oldest_rowid=%d oldest_date=%s newest_rowid=%d newest_date=%s "
+                "attachments=%d saved_attachments=%d elapsed=%.2fs total_for_chat=%d "
+                "next_end=%s",
+                chat_id,
+                chat_name,
+                page_number,
+                len(messages),
+                oldest.rowid,
+                oldest.date.isoformat(),
+                newest.rowid,
+                newest.date.isoformat(),
+                sum(len(message.attachments) for message in messages),
+                self._archive.count_saved_attachments(),
+                elapsed,
+                total,
+                end,
+            )
+            if len(messages) < limit:
+                break
+
+        return total
+
     async def _backfill_chat_history(
         self,
         *,

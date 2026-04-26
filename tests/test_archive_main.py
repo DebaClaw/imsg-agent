@@ -20,3 +20,10 @@ def test_archive_cli_accepts_options_before_subcommand() -> None:
     assert args.command == "backfill"
     assert args.debug is True
     assert args.history_page_size == 50
+
+
+def test_archive_cli_has_attachments_command() -> None:
+    args = _parser().parse_args(["attachments", "--history-page-size", "25"])
+
+    assert args.command == "attachments"
+    assert args.history_page_size == 25

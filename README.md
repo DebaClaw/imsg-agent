@@ -143,8 +143,9 @@ the cursor, and exits cleanly.
 
 Use this path when you want a local database of iMessage data with no GenAI involved.
 The archive stores what `imsg rpc` exposes: chats, messages, reactions, and attachment
-metadata including filenames, MIME/UTI, sizes, missing flags, and original attachment
-paths. It does not copy attachment file bytes into SQLite.
+metadata including filenames, MIME/UTI, sizes, missing flags, original attachment paths,
+and local archive paths. Attachment bytes are copied to `~/imsg-data/attachments/`; the
+SQLite database stores metadata and paths, not file blobs.
 
 The default database path is:
 
@@ -170,6 +171,12 @@ Only monitor new messages using the saved cursor:
 uv run imsg-archive monitor
 ```
 
+Fetch attachment metadata and copy available attachment files for archived messages:
+
+```bash
+uv run imsg-archive attachments --debug --history-page-size 250
+```
+
 Useful options:
 
 ```bash
@@ -177,6 +184,7 @@ uv run imsg-archive backfill --chat-limit 10000 --history-limit 100000
 uv run imsg-archive backfill --history-page-size 100
 uv run imsg-archive backfill --debug --history-page-size 50
 uv run imsg-archive backfill --debug --no-attachments --history-page-size 50
+uv run imsg-archive attachments --debug --history-page-size 250
 uv run imsg-archive monitor --db ~/imsg-data/imessage.sqlite
 uv run imsg-archive monitor --since-rowid 12345
 ```
@@ -196,6 +204,9 @@ Use `--no-attachments` as a diagnostic/degraded mode when `messages.history` res
 quickly without attachment metadata but stalls while expanding attachments or reactions.
 That mode still archives chats and messages, but `attachments` and `reactions` tables
 will not be populated for those fetched messages.
+Run `imsg-archive attachments` after a fast `--no-attachments` backfill to enrich the
+archive with attachment metadata and copy files into `~/imsg-data/attachments/`. The
+attachment pass uses the same timeout backoff behavior as message backfill.
 
 For a persistent macOS process, run the monitor under your preferred supervisor
 (`launchd`, `tmux`, `screen`, or a terminal session you keep open). Example:
@@ -211,7 +222,8 @@ Inspect counts with SQLite:
 sqlite3 ~/imsg-data/imessage.sqlite \
   'select (select count(*) from chats) as chats,
           (select count(*) from messages) as messages,
-          (select count(*) from attachments) as attachments;'
+          (select count(*) from attachments) as attachments,
+          (select count(*) from attachments where archived = 1) as saved_attachments;'
 ```
 
 ## Approval Workflow
