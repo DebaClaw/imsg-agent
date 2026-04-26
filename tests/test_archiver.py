@@ -260,6 +260,50 @@ async def test_backfill_retries_timeout_until_page_succeeds(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_backfill_keeps_reduced_page_size_after_timeout(tmp_path: Path) -> None:
+    class StableSmallerRPC(FakeRPC):
+        async def list_chats(self, limit: int = 20) -> list[Chat]:
+            return [_chat(7)]
+
+        async def get_history(
+            self,
+            chat_id: int,
+            limit: int = 50,
+            participants: list[str] | None = None,
+            start: str | None = None,
+            end: str | None = None,
+            include_attachments: bool = False,
+        ) -> list[Message]:
+            self.history_limits.append(limit)
+            if limit > 250:
+                raise IMsgRPCConnectionError("timeout")
+            if end is None:
+                return [
+                    _message(rowid=rowid, chat_id=chat_id)
+                    for rowid in range(1000, 750, -1)
+                ]
+            if len(self.history_limits) < 5:
+                return [
+                    _message(rowid=rowid, chat_id=chat_id)
+                    for rowid in range(750, 500, -1)
+                ]
+            return []
+
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    rpc = StableSmallerRPC()
+
+    chats, messages = await IMessageArchiver(archive, rpc).backfill(
+        history_limit=1_000,
+        history_page_size=1_000,
+    )
+
+    assert chats == 1
+    assert messages == 500
+    assert rpc.history_limits == [1000, 500, 250, 250, 250]
+    archive.close()
+
+
+@pytest.mark.asyncio
 async def test_backfill_skips_page_after_single_message_timeout(tmp_path: Path) -> None:
     class AlwaysTimeoutRPC(FakeRPC):
         async def list_chats(self, limit: int = 20) -> list[Chat]:

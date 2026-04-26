@@ -188,10 +188,11 @@ class IMessageArchiver:
                         break
                 else:
                     current_page_size = max(1, limit // 2)
+                    page_size = min(page_size, current_page_size)
                     if limit > 1:
                         logger.warning(
                             "Timed out fetching chat_id=%d name=%r page=%d page_size=%d "
-                            "end=%s elapsed=%.2fs; retrying with %d",
+                            "end=%s elapsed=%.2fs; lowering max page size to %d",
                             chat_id,
                             chat_name,
                             page_number,
