@@ -181,6 +181,10 @@ Sync Contacts data from `contacts-mcp`, then match archived chats by normalized
 phone/email identifiers:
 
 ```bash
+cd ~/src/contacts-mcp
+bun dist/index.js sync-provider --provider apple --direction pull
+
+cd ~/src/imsg-agent
 uv run imsg-archive contacts sync \
   --contacts-command "bun /Users/zob/src/contacts-mcp/dist/index.js"
 uv run imsg-archive contacts enrich
