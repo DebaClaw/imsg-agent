@@ -22,7 +22,7 @@ from .contact_enrichment import (
 )
 from .models import Attachment, Chat, Message, Reaction
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 ArchiveRow = dict[str, object]
 
@@ -48,6 +48,21 @@ def _safe_filename(value: str, fallback: str) -> str:
     return cleaned or fallback
 
 
+def _fts_query(value: str) -> str:
+    tokens = [token for token in re.split(r"\s+", value.strip()) if token]
+    if not tokens:
+        return '""'
+    return " ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens)
+
+
+def _hours_since(value: str, *, now: datetime) -> float:
+    try:
+        parsed = _parse_dt(value)
+    except ValueError:
+        return 0.0
+    return max(0.0, (now - parsed).total_seconds() / 3600)
+
+
 class IMessageArchive:
     def __init__(self, db_path: Path) -> None:
         self.path = Path(db_path).expanduser().resolve()
@@ -63,6 +78,15 @@ class IMessageArchive:
         self._db.close()
 
     def _init_schema(self) -> None:
+        self._db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        previous_schema = self._read_schema_version()
         self._db.executescript(
             """
             CREATE TABLE IF NOT EXISTS meta (
@@ -144,6 +168,32 @@ class IMessageArchive:
             CREATE INDEX IF NOT EXISTS idx_messages_guid ON messages(guid);
             CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_rowid);
 
+            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+            USING fts5(text, content='messages', content_rowid='rowid');
+
+            CREATE TRIGGER IF NOT EXISTS messages_fts_after_insert
+            AFTER INSERT ON messages
+            BEGIN
+                INSERT INTO messages_fts(rowid, text)
+                VALUES (new.rowid, new.text);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS messages_fts_after_delete
+            AFTER DELETE ON messages
+            BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, text)
+                VALUES('delete', old.rowid, old.text);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS messages_fts_after_text_update
+            AFTER UPDATE OF text ON messages
+            BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, text)
+                VALUES('delete', old.rowid, old.text);
+                INSERT INTO messages_fts(rowid, text)
+                VALUES (new.rowid, new.text);
+            END;
+
             CREATE TABLE IF NOT EXISTS contacts (
                 contact_id TEXT PRIMARY KEY,
                 full_name TEXT NOT NULL DEFAULT '',
@@ -193,8 +243,19 @@ class IMessageArchive:
         self._ensure_column("attachments", "local_path", "TEXT NOT NULL DEFAULT ''")
         self._ensure_column("attachments", "archived", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("attachments", "archive_error", "TEXT NOT NULL DEFAULT ''")
+        if previous_schema < 4:
+            self._db.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
         self.set_meta("schema_version", str(SCHEMA_VERSION))
         self._db.commit()
+
+    def _read_schema_version(self) -> int:
+        row = self._db.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+        if row is None:
+            return 0
+        try:
+            return int(row["value"])
+        except (TypeError, ValueError):
+            return 0
 
     def _ensure_column(self, table: str, column: str, definition: str) -> None:
         rows = self._db.execute(f"PRAGMA table_info({table})").fetchall()
@@ -386,6 +447,7 @@ class IMessageArchive:
             SELECT
                 (SELECT COUNT(*) FROM chats) AS chats,
                 (SELECT COUNT(*) FROM messages) AS messages,
+                (SELECT COUNT(*) FROM messages_fts) AS search_indexed_messages,
                 (SELECT COUNT(*) FROM attachments) AS attachments,
                 (SELECT COUNT(*) FROM attachments WHERE archived = 1) AS saved_attachments,
                 (SELECT COUNT(*) FROM attachments WHERE missing = 1) AS missing_attachments,
@@ -416,6 +478,62 @@ class IMessageArchive:
         ).fetchone()
         keys = row.keys()
         return {key: int(row[key]) for key in keys}
+
+    def search_messages(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+        chat_id: int | None = None,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> list[ArchiveRow]:
+        where = ["messages_fts MATCH ?"]
+        params: list[object] = [_fts_query(query)]
+        if chat_id is not None:
+            where.append("m.chat_id = ?")
+            params.append(chat_id)
+        if since:
+            where.append("m.date >= ?")
+            params.append(since)
+        if until:
+            where.append("m.date < ?")
+            params.append(until)
+        params.append(limit)
+        rows = self._db.execute(
+            f"""
+            SELECT
+                m.rowid AS message_rowid,
+                m.chat_id AS chat_id,
+                c.name AS chat_name,
+                m.sender AS sender,
+                m.date AS message_at,
+                m.is_from_me AS is_from_me,
+                m.text AS text,
+                m.has_attachments AS has_attachments,
+                bm25(messages_fts) AS rank,
+                (
+                    SELECT GROUP_CONCAT(full_name, ', ')
+                    FROM (
+                        SELECT DISTINCT contacts.full_name AS full_name
+                        FROM chat_contact_matches matches
+                        JOIN contacts ON contacts.contact_id = matches.contact_id
+                        WHERE matches.chat_id = m.chat_id
+                            AND matches.status = 'matched'
+                            AND contacts.full_name != ''
+                        ORDER BY contacts.full_name
+                    )
+                ) AS contacts
+            FROM messages_fts
+            JOIN messages m ON m.rowid = messages_fts.rowid
+            JOIN chats c ON c.id = m.chat_id
+            WHERE {" AND ".join(where)}
+            ORDER BY rank ASC, m.date DESC, m.rowid DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
 
     def recent_chats(self, *, limit: int = 20) -> list[ArchiveRow]:
         rows = self._db.execute(
@@ -462,6 +580,66 @@ class IMessageArchive:
             (limit,),
         ).fetchall()
         return [self._row_to_dict(row) for row in rows]
+
+    def attention_items(self, *, limit: int = 50) -> list[ArchiveRow]:
+        rows = self._db.execute(
+            """
+            WITH latest_messages AS (
+                SELECT
+                    m.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY m.chat_id
+                        ORDER BY m.date DESC, m.rowid DESC
+                    ) AS rank
+                FROM messages m
+            )
+            SELECT
+                c.id AS chat_id,
+                c.name AS name,
+                c.identifier AS identifier,
+                c.is_group AS is_group,
+                latest_messages.rowid AS message_rowid,
+                latest_messages.sender AS sender,
+                latest_messages.date AS last_message_at,
+                latest_messages.text AS last_text,
+                latest_messages.has_attachments AS has_attachments,
+                (
+                    SELECT COUNT(*)
+                    FROM messages count_messages
+                    WHERE count_messages.chat_id = c.id
+                ) AS messages,
+                (
+                    SELECT GROUP_CONCAT(full_name, ', ')
+                    FROM (
+                        SELECT DISTINCT contacts.full_name AS full_name
+                        FROM chat_contact_matches matches
+                        JOIN contacts ON contacts.contact_id = matches.contact_id
+                        WHERE matches.chat_id = c.id
+                            AND matches.status = 'matched'
+                            AND contacts.full_name != ''
+                        ORDER BY contacts.full_name
+                    )
+                ) AS contacts
+            FROM latest_messages
+            JOIN chats c ON c.id = latest_messages.chat_id
+            WHERE latest_messages.rank = 1
+                AND latest_messages.is_from_me = 0
+                AND latest_messages.is_reaction = 0
+            ORDER BY latest_messages.date DESC, latest_messages.rowid DESC
+            LIMIT ?
+            """,
+            (limit * 4,),
+        ).fetchall()
+        now = datetime.now(UTC)
+        items = [self._score_attention_item(self._row_to_dict(row), now=now) for row in rows]
+        items.sort(
+            key=lambda row: (
+                -int(str(row["score"])),
+                -float(str(row["hours_waiting"])),
+                str(row["last_message_at"]),
+            )
+        )
+        return items[:limit]
 
     def needs_reply(self, *, limit: int = 50) -> list[ArchiveRow]:
         rows = self._db.execute(
@@ -764,6 +942,37 @@ class IMessageArchive:
     def _row_to_dict(row: sqlite3.Row) -> ArchiveRow:
         keys = row.keys()
         return {key: row[key] for key in keys}
+
+    @staticmethod
+    def _score_attention_item(row: ArchiveRow, *, now: datetime) -> ArchiveRow:
+        hours_waiting = _hours_since(str(row["last_message_at"]), now=now)
+        text = str(row.get("last_text") or "")
+        contacts = str(row.get("contacts") or "")
+        score = 40
+        reasons = ["latest message is inbound"]
+        if "?" in text:
+            score += 12
+            reasons.append("asks a question")
+        if hours_waiting >= 24:
+            boost = min(24, int(hours_waiting // 24) * 6)
+            score += boost
+            reasons.append(f"waiting {int(hours_waiting // 24)}d")
+        elif hours_waiting >= 4:
+            score += 4
+            reasons.append("waiting several hours")
+        if contacts:
+            score += 5
+            reasons.append("matched contact")
+        if int(str(row.get("has_attachments") or 0)):
+            score += 3
+            reasons.append("has attachment")
+        if int(str(row.get("is_group") or 0)):
+            score -= 12
+            reasons.append("group chat")
+        row["score"] = max(0, min(100, score))
+        row["hours_waiting"] = round(hours_waiting, 2)
+        row["reason"] = "; ".join(reasons)
+        return row
 
     def _ensure_chat_for_message(self, message: Message, now: str) -> None:
         self._db.execute(

@@ -58,16 +58,28 @@ def test_archive_cli_has_contacts_enrich_command() -> None:
 def test_archive_cli_has_visibility_commands() -> None:
     stats = _parser().parse_args(["stats", "--json"])
     recent = _parser().parse_args(["recent", "--limit", "5"])
+    attention = _parser().parse_args(["attention", "--limit", "7", "--json"])
     needs_reply = _parser().parse_args(["needs-reply", "--limit", "10", "--json"])
     unresolved = _parser().parse_args(["unresolved"])
     attachment_issues = _parser().parse_args(["attachment-issues"])
+    search = _parser().parse_args(
+        ["search", "messages", "coffee", "--chat-id", "7", "--since", "2026-01-01"]
+    )
 
     assert stats.command == "stats"
     assert stats.json_output is True
     assert recent.command == "recent"
     assert recent.limit == 5
+    assert attention.command == "attention"
+    assert attention.limit == 7
+    assert attention.json_output is True
     assert needs_reply.command == "needs-reply"
     assert needs_reply.limit == 10
     assert needs_reply.json_output is True
     assert unresolved.command == "unresolved"
     assert attachment_issues.command == "attachment-issues"
+    assert search.command == "search"
+    assert search.search_command_name == "messages"
+    assert search.query == "coffee"
+    assert search.chat_id == 7
+    assert search.since == "2026-01-01"

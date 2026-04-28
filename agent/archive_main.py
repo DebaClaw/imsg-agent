@@ -161,6 +161,57 @@ def run_recent(args: argparse.Namespace) -> None:
         archive.close()
 
 
+def run_search_messages(args: argparse.Namespace) -> None:
+    config = load_config()
+    archive = IMessageArchive(Path(args.db or archive_db_path(config)))
+    try:
+        rows = archive.search_messages(
+            args.query,
+            limit=args.limit,
+            chat_id=args.chat_id,
+            since=args.since,
+            until=args.until,
+        )
+        _print_rows(
+            rows,
+            [
+                ("message_rowid", "message"),
+                ("chat_id", "chat"),
+                ("message_at", "message_at"),
+                ("chat_name", "chat_name"),
+                ("contacts", "contacts"),
+                ("sender", "sender"),
+                ("text", "text"),
+            ],
+            json_output=args.json_output,
+        )
+    finally:
+        archive.close()
+
+
+def run_attention(args: argparse.Namespace) -> None:
+    config = load_config()
+    archive = IMessageArchive(Path(args.db or archive_db_path(config)))
+    try:
+        rows = archive.attention_items(limit=args.limit)
+        _print_rows(
+            rows,
+            [
+                ("score", "score"),
+                ("chat_id", "chat"),
+                ("last_message_at", "last_message_at"),
+                ("name", "name"),
+                ("contacts", "contacts"),
+                ("sender", "sender"),
+                ("last_text", "last_text"),
+                ("reason", "reason"),
+            ],
+            json_output=args.json_output,
+        )
+    finally:
+        archive.close()
+
+
 def run_needs_reply(args: argparse.Namespace) -> None:
     config = load_config()
     archive = IMessageArchive(Path(args.db or archive_db_path(config)))
@@ -368,6 +419,11 @@ def _parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", help="Backfill once, then monitor")
     stats = subparsers.add_parser("stats", help="Show archive totals")
     recent = subparsers.add_parser("recent", help="List recently active chats")
+    attention = subparsers.add_parser(
+        "attention",
+        help="Rank inbound chats that likely need attention without GenAI",
+    )
+    search = subparsers.add_parser("search", help="Search archived data")
     needs_reply = subparsers.add_parser(
         "needs-reply",
         help="List chats where the latest archived message is inbound",
@@ -383,8 +439,21 @@ def _parser() -> argparse.ArgumentParser:
     for subparser in (backfill, monitor, attachments, run):
         _add_options(subparser, defaults=False)
     _add_read_only_options(stats)
-    for subparser in (recent, needs_reply, unresolved, attachment_issues):
+    for subparser in (recent, attention, needs_reply, unresolved, attachment_issues):
         _add_limited_read_only_options(subparser)
+    search_subparsers = search.add_subparsers(
+        dest="search_command_name",
+        required=True,
+    )
+    search_messages = search_subparsers.add_parser(
+        "messages",
+        help="Full-text search archived messages",
+    )
+    _add_limited_read_only_options(search_messages)
+    search_messages.add_argument("query")
+    search_messages.add_argument("--chat-id", type=int)
+    search_messages.add_argument("--since", help="Include messages at or after this ISO date")
+    search_messages.add_argument("--until", help="Include messages before this ISO date")
     contacts_subparsers = contacts.add_subparsers(
         dest="contacts_command_name",
         required=True,
@@ -452,6 +521,11 @@ def cli() -> None:
         run_stats(args)
     elif args.command == "recent":
         run_recent(args)
+    elif args.command == "attention":
+        run_attention(args)
+    elif args.command == "search":
+        if args.search_command_name == "messages":
+            run_search_messages(args)
     elif args.command == "needs-reply":
         run_needs_reply(args)
     elif args.command == "unresolved":

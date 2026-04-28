@@ -250,11 +250,67 @@ def test_archive_reports_stats_and_needs_reply(tmp_path: Path) -> None:
 
     assert stats["chats"] == 2
     assert stats["messages"] == 3
+    assert stats["search_indexed_messages"] == 3
     assert stats["attachments"] == 3
     assert len(needs_reply) == 1
     assert needs_reply[0]["chat_id"] == 8
     assert needs_reply[0]["last_text"] == "Can you look at this?"
     assert recent[0]["chat_id"] == 8
+    archive.close()
+
+
+def test_archive_searches_messages_with_fts(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    match = _message(rowid=300)
+    match.text = "Coffee plan for Saturday morning"
+    miss = _message(rowid=301)
+    miss.text = "Lunch tomorrow"
+    archive.upsert_message(match)
+    archive.upsert_message(miss)
+
+    results = archive.search_messages("coffee saturday")
+
+    assert len(results) == 1
+    assert results[0]["message_rowid"] == 300
+    assert results[0]["text"] == "Coffee plan for Saturday morning"
+    archive.close()
+
+
+def test_archive_attention_items_rank_inbound_replies(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    question = _message(rowid=400)
+    question.text = "Can you look at this?"
+    question.date = datetime(2026, 4, 25, 13, 0, 0, tzinfo=UTC)
+    archive.upsert_message(question)
+
+    archive.upsert_chat(
+        Chat(
+            id=9,
+            identifier="iMessage;-;+15557654321",
+            name="FYI",
+            service="iMessage",
+            last_message_at=NOW,
+            participants=["+15557654321"],
+        )
+    )
+    fyi = _message(rowid=401)
+    fyi.chat_id = 9
+    fyi.chat_identifier = "iMessage;-;+15557654321"
+    fyi.chat_name = "FYI"
+    fyi.sender = "+15557654321"
+    fyi.text = "Just an FYI"
+    fyi.date = datetime(2026, 4, 25, 14, 0, 0, tzinfo=UTC)
+    fyi.participants = ["+15557654321"]
+    archive.upsert_message(fyi)
+
+    items = archive.attention_items(limit=5)
+
+    assert len(items) == 2
+    assert items[0]["message_rowid"] == 400
+    assert int(str(items[0]["score"])) > int(str(items[1]["score"]))
+    assert "asks a question" in str(items[0]["reason"])
     archive.close()
 
 

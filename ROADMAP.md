@@ -185,6 +185,8 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ✅ `scripts/install_launchd.sh` — install a user LaunchAgent for `imsg-archive monitor`
 - ✅ `imsg-archive stats` — archive totals for chats, messages, contacts, attachments
 - ✅ `imsg-archive recent` — recently active chats with last message preview
+- ✅ `imsg-archive search messages` — FTS-backed archived message search
+- ✅ `imsg-archive attention` — deterministic no-AI ranking for reply awareness
 - ✅ `imsg-archive needs-reply` — chats where the latest archived message is inbound
 - ✅ `imsg-archive unresolved` — contact match gaps for review
 - ✅ `imsg-archive attachment-issues` — attachments that were not copied locally
@@ -194,7 +196,7 @@ interfaces and AI workflows on top without making the archive depend on AI.
 #### Management Interfaces
 - ⬜ TUI dashboard for communications awareness and triage
 - ⬜ Local web interface for archive browsing and communication management
-- ⬜ Shared read-only service/query layer for CLI, TUI, and web
+- 🔄 Shared read-only service/query layer for CLI, TUI, and web
 - ⬜ Saved views: unanswered, recently active, quiet relationships, attachment issues
 
 #### AI Action Layer

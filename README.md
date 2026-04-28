@@ -20,6 +20,8 @@ database.
   reactions, and a live cursor in `~/imsg-data/imessage.sqlite`.
 - **Archive visibility CLI**: read-only commands show archive totals, recent chats,
   unanswered inbound conversations, unresolved contact matches, and attachment issues.
+- **Message search and attention queue**: FTS-backed message search and deterministic
+  no-AI attention ranking help answer what needs a reply now.
 - **No-GenAI archive mode**: archive backfill and monitoring do not import or call the
   drafting system or any model API.
 - **Human-readable data store**: inbox items, chat context, history, drafts, outbox,
@@ -229,10 +231,13 @@ uv run imsg-archive monitor --db ~/imsg-data/imessage.sqlite
 uv run imsg-archive monitor --since-rowid 12345
 uv run imsg-archive stats
 uv run imsg-archive recent --limit 25
+uv run imsg-archive attention --limit 25
+uv run imsg-archive search messages "coffee saturday" --limit 25
+uv run imsg-archive search messages "coffee" --chat-id 41 --since 2026-01-01
 uv run imsg-archive needs-reply --limit 50
 uv run imsg-archive unresolved --limit 50
 uv run imsg-archive attachment-issues --limit 50
-uv run imsg-archive needs-reply --json
+uv run imsg-archive attention --json
 ```
 
 Backfill pages each chat's history using `--history-page-size` so large chats do not need
@@ -267,12 +272,17 @@ For a scriptable archive dashboard, use the read-only commands:
 ```bash
 uv run imsg-archive stats
 uv run imsg-archive recent --limit 25
+uv run imsg-archive attention --limit 25
+uv run imsg-archive search messages "coffee saturday" --limit 25
 uv run imsg-archive needs-reply --limit 50
 uv run imsg-archive unresolved --limit 50
 uv run imsg-archive attachment-issues --limit 50
 ```
 
-Add `--json` to use the output from other scripts.
+`attention` is deterministic: it scores latest-inbound chats using reply state, age,
+questions, Contacts matches, attachments, and group-chat status. It does not call AI.
+`search messages` uses SQLite FTS5 and can be narrowed with `--chat-id`, `--since`, and
+`--until`. Add `--json` to use output from other scripts.
 
 You can also inspect counts directly with SQLite:
 
