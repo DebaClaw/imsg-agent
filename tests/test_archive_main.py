@@ -35,7 +35,7 @@ def test_archive_cli_has_contacts_sync_command() -> None:
             "contacts",
             "sync",
             "--contacts-command",
-            "bun /Users/zob/src/contacts-mcp/dist/index.js",
+            "bun ${HOME}/src/contacts-mcp/dist/index.js",
             "--contacts-store",
             "/tmp/contacts",
         ]
@@ -43,7 +43,7 @@ def test_archive_cli_has_contacts_sync_command() -> None:
 
     assert args.command == "contacts"
     assert args.contacts_command_name == "sync"
-    assert args.contacts_command == "bun /Users/zob/src/contacts-mcp/dist/index.js"
+    assert args.contacts_command == "bun ${HOME}/src/contacts-mcp/dist/index.js"
     assert args.contacts_store == "/tmp/contacts"
 
 

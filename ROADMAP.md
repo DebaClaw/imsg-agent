@@ -190,6 +190,7 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ✅ `imsg-archive needs-reply` — chats where the latest archived message is inbound
 - ✅ `imsg-archive unresolved` — contact match gaps for review
 - ✅ `imsg-archive attachment-issues` — attachments that were not copied locally
+- ✅ `imsg-mcp` — read-only MCP tools over the SQLite archive
 - ⬜ Incremental Contacts enrichment during monitor or scheduled maintenance
 - ⬜ Resumable attachment repair state for large attachment recovery jobs
 

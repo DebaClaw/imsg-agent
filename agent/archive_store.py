@@ -77,6 +77,12 @@ class IMessageArchive:
     def close(self) -> None:
         self._db.close()
 
+    def __enter__(self) -> IMessageArchive:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.close()
+
     def _init_schema(self) -> None:
         self._db.execute(
             """
@@ -529,6 +535,56 @@ class IMessageArchive:
             JOIN chats c ON c.id = m.chat_id
             WHERE {" AND ".join(where)}
             ORDER BY rank ASC, m.date DESC, m.rowid DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def chat_messages(
+        self,
+        chat_id: int,
+        *,
+        limit: int = 50,
+        before: str | None = None,
+        after: str | None = None,
+    ) -> list[ArchiveRow]:
+        where = ["m.chat_id = ?"]
+        params: list[object] = [chat_id]
+        if before:
+            where.append("m.date < ?")
+            params.append(before)
+        if after:
+            where.append("m.date >= ?")
+            params.append(after)
+        params.append(limit)
+        rows = self._db.execute(
+            f"""
+            SELECT
+                m.rowid AS message_rowid,
+                m.chat_id AS chat_id,
+                c.name AS chat_name,
+                m.sender AS sender,
+                m.date AS message_at,
+                m.is_from_me AS is_from_me,
+                m.text AS text,
+                m.has_attachments AS has_attachments,
+                (
+                    SELECT GROUP_CONCAT(full_name, ', ')
+                    FROM (
+                        SELECT DISTINCT contacts.full_name AS full_name
+                        FROM chat_contact_matches matches
+                        JOIN contacts ON contacts.contact_id = matches.contact_id
+                        WHERE matches.chat_id = m.chat_id
+                            AND matches.status = 'matched'
+                            AND contacts.full_name != ''
+                        ORDER BY contacts.full_name
+                    )
+                ) AS contacts
+            FROM messages m
+            JOIN chats c ON c.id = m.chat_id
+            WHERE {" AND ".join(where)}
+            ORDER BY m.date DESC, m.rowid DESC
             LIMIT ?
             """,
             params,

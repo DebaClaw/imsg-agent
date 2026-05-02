@@ -42,7 +42,7 @@ def _message(rowid: int = 123) -> Message:
                 mime_type="image/jpeg",
                 total_bytes=2048,
                 is_sticker=False,
-                original_path="/Users/zob/Library/Messages/Attachments/photo.jpg",
+                original_path="/tmp/Messages/Attachments/photo.jpg",
                 missing=False,
             )
         ],

@@ -1,6 +1,6 @@
 # PLAN.md — imsg-agent Architecture & Design
 
-Last updated: 2026-04-04
+Last updated: 2026-05-02
 
 ---
 
@@ -12,10 +12,12 @@ drafting appropriate responses, and sending them — with the user always in con
 
 The system must be:
 - **Safe by default** — no message is ever sent without an explicit approval step
-- **Transparent** — every action is a file that can be read, edited, or deleted by hand
+- **Transparent** — every approval action is a file that can be read, edited, or deleted by hand
 - **Recoverable** — restarts never lose messages; the cursor + inbox pattern is idempotent
 - **Auditable** — the `sent/` archive is the complete record of what was sent and why
-- **Evolvable** — the file-based store migrates cleanly to a DB+queue without changing the agent logic
+- **Queryable** — the no-AI archive is stored in SQLite for local search, attention ranking,
+  and management surfaces
+- **Evolvable** — the approval workflow can migrate to a DB+queue without changing the agent logic
 
 ---
 
@@ -45,7 +47,7 @@ The system must be:
 │                 →  store.py  (~/imsg-data/)             │
 │                 →  archive_store.py (SQLite archive)    │
 └────────────────────────┬────────────────────────────────┘
-                         │ reads/writes markdown files
+                         │ reads/writes markdown files + SQLite archive
                          ▼
 ┌─────────────────────────────────────────────────────────┐
 │                   ~/imsg-data/                          │
@@ -98,9 +100,11 @@ The system must be:
 
 ---
 
-### ADR-003: Data Store — Markdown files with YAML frontmatter
+### ADR-003: Approval Store — Markdown files with YAML frontmatter
 
-**Decision:** Use `~/imsg-data/` as a directory-based store with one `.md` file per entity.
+**Decision:** Use `~/imsg-data/` as a directory-based store with `.md` files for the human
+approval workflow: inbox, chat context, rolling history, drafts, outbox, sent archives,
+errors, nudges, and digests.
 
 **Rationale:**
 - Human-readable and human-editable without any tooling.
@@ -108,19 +112,45 @@ The system must be:
 - Easy to inspect the full state of the system with `ls` and `cat`.
 - Git-diffable if the operator wants to version their data.
 - Maps cleanly to a relational schema for future DB migration (see PLAN § Migration).
-- Avoids a database dependency in Phase 1 (no SQLite setup, no schema migrations, no ORM).
+- Keeps the safety-critical approval path legible even while the archive/query layer uses SQLite.
 
 **Rejected alternatives:**
-- SQLite: right end-state, not right for early iteration; schema changes require migrations
+- SQLite for approval state: useful for scale, but worse for early human review/edit/approval.
+  The project now uses SQLite where it is strongest: the append-heavy local archive and query
+  surface.
 - JSON files: less readable for message bodies; no separation of metadata from content
 - Plain text: no structured metadata without parsing
 
 **Known limitations:**
 - Not suitable for high-volume chats (thousands of messages/day). File per message becomes unwieldy.
 - No atomic transactions: a crash mid-write can leave partial files (mitigated by write-then-rename).
-- No query capability: finding messages requires filesystem traversal or indexing.
+- No broad query capability over approval files. Conversation search and attention ranking use the
+  SQLite archive instead.
 
-These are acceptable for Phase 1. Phase 3 addresses them with a DB backend.
+These are acceptable for the approval workflow. A future DB+queue can replace this layer when
+concurrent workers or higher volume require it.
+
+---
+
+### ADR-003B: Archive Store — SQLite
+
+**Decision:** Maintain `~/imsg-data/imessage.sqlite` as a no-GenAI archive of chats, messages,
+attachment metadata, reactions, contact snapshots, and contact matches.
+
+**Rationale:**
+- Historical message search and "what needs attention?" queries need indexed reads.
+- Backfill and monitoring are append/update-heavy and idempotent by natural iMessage keys:
+  chat id and message rowid.
+- Archive operations should not depend on drafting, approval, or any model API.
+- SQLite is the right local-first store for a single-machine operational archive.
+- TUI, local web, saved views, and AI action layers can all read from the same queryable source.
+
+**Boundaries:**
+- The archive never reads `~/Library/Messages/chat.db` directly; it only stores data returned by
+  `imsg rpc`.
+- The archive is not the source of truth for approved sends. `outbox/`, `sent/`, and `errors/`
+  remain the approval/send audit path.
+- SQLite stores attachment metadata and local archive paths, not file blobs.
 
 ---
 
@@ -258,6 +288,12 @@ messages). The AI drafter receives both as context.
 - Writes only to the SQLite archive
 - Does not import the drafter or call any model API
 
+### `mcp_server.py`
+- Exposes read-only MCP tools over `archive_store.py`
+- Provides archive stats, recent chats, attention, needs-reply, message search, chat history,
+  unresolved contact matches, and attachment issues
+- Does not send messages, approve drafts, mutate the archive, or call any model API
+
 ---
 
 ## Data Flow Diagram
@@ -266,12 +302,17 @@ messages). The AI drafter receives both as context.
 imsg rpc
   │
   │ JSON notifications (new messages)
-  ▼
-inbox.py ──────────────────────────────► store.py
-  │                                        │
-  │ Message objects                        │ write inbox/{rowid}-{chatID}.md
-  │                                        │ update chats/{chatID}/context.md
-  │                                        │ append chats/{chatID}/history.md
+  ├──────────────────────────────────────────────┐
+  ▼                                              ▼
+inbox.py                                      archiver.py
+  │                                              │
+  │ Message objects                              │ idempotent upserts
+  ▼                                              ▼
+store.py                                     archive_store.py
+  │                                              │
+  │ write inbox/{rowid}-{chatID}.md              │ imessage.sqlite
+  │ update chats/{chatID}/context.md             │ search / recent / attention
+  │ append chats/{chatID}/history.md             │ contacts / attachments
   ▼
 drafter.py
   │
@@ -342,21 +383,26 @@ Even if cursor is wrong, the same message won't generate a second inbox file or 
 
 ## Storage Migration Path
 
-### Phase 1 (current): Markdown files
-- `store.py` reads/writes `~/imsg-data/`
-- All queries are filesystem traversals
+### Current: Markdown approval store + SQLite archive
+- `store.py` reads/writes human-editable approval workflow files under `~/imsg-data/`.
+- `archive_store.py` maintains `~/imsg-data/imessage.sqlite` for historical messages,
+  attachments, reactions, contacts, search, and deterministic attention ranking.
+- `archiver.py` backfills and monitors the archive through `imsg rpc`.
+- Markdown remains the source of truth for draft approval, outbox, sent archives, and errors.
+- SQLite is the source of truth for archive/search/visibility surfaces.
 
-### Phase 4: SQLite index
-- Add `store_index.py`: maintains a SQLite index of frontmatter metadata
-- `store.py` API unchanged; queries go through index
-- Files remain the source of truth; index is a projection
-- Zero change to `inbox.py`, `drafter.py`, `sender.py`
+### Near-term: Shared query layer
+- Keep building reusable read-only query methods on top of `archive_store.py`.
+- CLI, TUI, local web, saved views, and AI action commands should use the same archive queries.
+- AI summaries and draft suggestions may read archive data, but must preserve per-chat isolation
+  and write reviewable artifacts rather than mutating messages invisibly.
 
-### Phase 5: Full DB + Queue
-- Replace `store.py` with a DB-backed implementation (PostgreSQL or SQLite)
-- Replace `outbox/` with a proper message queue (Redis, SQLite queue, or a cloud queue)
-- The agent lifecycle (`main.py`) and all modules above `store.py` are unchanged
-- Migration script: ingest all existing `.md` files into the DB
+### Later: Full approval DB + Queue
+- Replace `store.py` with a DB-backed implementation only when volume/concurrency requires it.
+- Replace `outbox/` with a proper message queue (SQLite queue, Redis, PostgreSQL, or similar).
+- The agent lifecycle (`main.py`) and modules above `store.py` should stay mostly unchanged.
+- Migration script: ingest existing approval `.md` files into the DB-backed approval store.
 
-The key design principle: **`store.py` is the only thing that changes across phases.**
-Everything above it (inbox, drafter, sender, main) is pure business logic and never touches storage directly.
+The key design principle: **the archive and approval workflow are related but separate.**
+SQLite is already correct for historical conversation visibility; Markdown remains correct for
+human-controlled approval until there is a concrete need for a queue-backed approval store.

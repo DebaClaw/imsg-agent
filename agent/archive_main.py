@@ -478,7 +478,7 @@ def _parser() -> argparse.ArgumentParser:
         default="contacts-mcp",
         help=(
             "Command used to run contacts-mcp. Use e.g. "
-            "'bun /Users/zob/src/contacts-mcp/dist/index.js' when not installed."
+            "'bun ${HOME}/src/contacts-mcp/dist/index.js' when not installed."
         ),
     )
     contacts_sync.add_argument(

@@ -208,12 +208,12 @@ Sync Contacts data from `contacts-mcp`, then match archived chats by normalized
 phone/email identifiers:
 
 ```bash
-cd ~/src/contacts-mcp
+cd "${HOME}/src/contacts-mcp"
 bun dist/index.js sync-provider --provider apple --direction pull
 
-cd ~/src/imsg-agent
+cd "${HOME}/src/imsg-agent"
 uv run imsg-archive contacts sync \
-  --contacts-command "bun /Users/zob/src/contacts-mcp/dist/index.js"
+  --contacts-command 'bun ${HOME}/src/contacts-mcp/dist/index.js'
 uv run imsg-archive contacts enrich
 ```
 
@@ -225,7 +225,7 @@ uv run imsg-archive backfill --history-page-size 100
 uv run imsg-archive backfill --debug --history-page-size 50
 uv run imsg-archive backfill --debug --no-attachments --history-page-size 50
 uv run imsg-archive attachments --debug --history-page-size 250
-uv run imsg-archive contacts sync --contacts-command "bun /Users/zob/src/contacts-mcp/dist/index.js"
+uv run imsg-archive contacts sync --contacts-command 'bun ${HOME}/src/contacts-mcp/dist/index.js'
 uv run imsg-archive contacts enrich --default-country US
 uv run imsg-archive monitor --db ~/imsg-data/imessage.sqlite
 uv run imsg-archive monitor --since-rowid 12345
@@ -283,6 +283,38 @@ uv run imsg-archive attachment-issues --limit 50
 questions, Contacts matches, attachments, and group-chat status. It does not call AI.
 `search messages` uses SQLite FTS5 and can be narrowed with `--chat-id`, `--since`, and
 `--until`. Add `--json` to use output from other scripts.
+
+## MCP Server
+
+`imsg-agent` includes a read-only MCP server over the local SQLite archive. It does not
+send messages, approve drafts, or call any model API.
+
+Run it over stdio:
+
+```bash
+uv run imsg-mcp
+```
+
+Point an MCP client at:
+
+```json
+{
+  "command": "uv",
+  "args": ["run", "imsg-mcp"],
+  "cwd": "${HOME}/src/imsg-agent"
+}
+```
+
+Available tools:
+
+- `archive_stats`
+- `recent_chats`
+- `attention`
+- `needs_reply`
+- `search_messages`
+- `get_chat_messages`
+- `unresolved_contacts`
+- `attachment_issues`
 
 You can also inspect counts directly with SQLite:
 

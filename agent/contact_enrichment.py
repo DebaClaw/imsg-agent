@@ -174,19 +174,27 @@ def load_contacts_from_contacts_mcp(
     store_path: str | None = None,
     include_archived: bool = False,
 ) -> list[dict[str, Any]]:
-    args = [*shlex.split(command), "export", "--format", "json", "--output", "-"]
+    args = [
+        os.path.expandvars(os.path.expanduser(part))
+        for part in shlex.split(command)
+    ]
+    args.extend(["export", "--format", "json", "--output", "-"])
     if include_archived:
         args.append("--include-archived")
     env = os.environ.copy()
     if store_path:
-        env["CONTACTS_MCP_STORE"] = store_path
-    completed = subprocess.run(
-        args,
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+        env["CONTACTS_MCP_STORE"] = os.path.expandvars(os.path.expanduser(store_path))
+    try:
+        completed = subprocess.run(
+            args,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        raise RuntimeError(f"contacts-mcp export failed: {detail}") from exc
     parsed = json.loads(completed.stdout)
     if not isinstance(parsed, list):
         raise ValueError("contacts-mcp export did not return a JSON list")
