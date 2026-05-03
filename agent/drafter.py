@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
-from .models import Draft
+from .models import Draft, Message
 from .store import MessageStore
 
 logger = logging.getLogger(__name__)
@@ -102,9 +102,20 @@ class Drafter:
         message = self._store.read_inbox_message(inbox_path)
         if message is None:
             return None
+        return await self.process_message(message)
 
+    async def process_message(
+        self,
+        message: Message,
+        *,
+        history_override: str | None = None,
+    ) -> Draft | None:
         context, context_body = self._store.read_chat_context_document(message.chat_id)
-        history = self._store.read_chat_history(message.chat_id)
+        history = (
+            history_override
+            if history_override is not None
+            else self._store.read_chat_history(message.chat_id)
+        )
 
         if self._store.draft_exists_for_source(message.chat_id, message.rowid):
             logger.debug(

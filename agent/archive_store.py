@@ -293,6 +293,17 @@ class IMessageArchive:
         self.set_meta("cursor", str(rowid))
         self._db.commit()
 
+    def read_agent_cursor(self) -> int:
+        value = self.get_meta("agent_draft_cursor", "0")
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+
+    def write_agent_cursor(self, rowid: int) -> None:
+        self.set_meta("agent_draft_cursor", str(rowid))
+        self._db.commit()
+
     def upsert_chat(self, chat: Chat) -> None:
         now = _fmt_dt(datetime.now(UTC))
         self._db.execute(
@@ -540,6 +551,72 @@ class IMessageArchive:
             params,
         ).fetchall()
         return [self._row_to_dict(row) for row in rows]
+
+    def inbound_messages_after(self, rowid: int, *, limit: int = 50) -> list[Message]:
+        rows = self._db.execute(
+            """
+            SELECT
+                m.rowid, m.chat_id, m.guid, m.sender, m.text, m.date, m.is_from_me,
+                m.service, m.has_attachments, m.reply_to_guid,
+                m.thread_originator_guid, m.destination_caller_id, m.is_reaction,
+                m.reaction_type, m.chat_identifier, m.chat_guid, m.chat_name,
+                m.participants_json, m.is_group
+            FROM messages m
+            WHERE m.rowid > ?
+                AND m.is_from_me = 0
+                AND m.is_reaction = 0
+            ORDER BY m.rowid ASC
+            LIMIT ?
+            """,
+            (rowid, limit),
+        ).fetchall()
+        return [self._message_from_row(row) for row in rows]
+
+    def chat_context_seed(self, chat_id: int) -> ArchiveRow:
+        row = self._db.execute(
+            """
+            SELECT id, identifier, guid, name, service, last_message_at,
+                participants_json, is_group
+            FROM chats
+            WHERE id = ?
+            """,
+            (chat_id,),
+        ).fetchone()
+        if row is None:
+            return {}
+        data = self._row_to_dict(row)
+        data["participants"] = self._loads_json_list(str(data.pop("participants_json", "[]")))
+        return data
+
+    def chat_history_markdown(
+        self,
+        chat_id: int,
+        *,
+        through_rowid: int,
+        limit: int = 20,
+    ) -> str:
+        rows = self._db.execute(
+            """
+            SELECT rowid, sender, text, date, is_from_me
+            FROM messages
+            WHERE chat_id = ?
+                AND rowid <= ?
+            ORDER BY date DESC, rowid DESC
+            LIMIT ?
+            """,
+            (chat_id, through_rowid, limit),
+        ).fetchall()
+        entries: list[str] = []
+        for row in reversed(rows):
+            sender = "me" if int(row["is_from_me"]) else str(row["sender"] or "")
+            direction = "→ me" if int(row["is_from_me"]) else f"← {sender}"
+            body_text = str(row["text"] or "") or "_(no text)_"
+            entries.append(
+                f"<!-- rowid:{int(row['rowid'])} -->\n"
+                f"**{direction}** _{row['date']}_\n\n"
+                f"{body_text}\n"
+            )
+        return "\n".join(entries)
 
     def chat_messages(
         self,
@@ -981,6 +1058,40 @@ class IMessageArchive:
     def _add_identifier(values: set[str], value: str) -> None:
         if value:
             values.add(value)
+
+    @staticmethod
+    def _loads_json_list(value: str) -> list[str]:
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [str(item) for item in parsed]
+
+    @classmethod
+    def _message_from_row(cls, row: sqlite3.Row) -> Message:
+        return Message(
+            rowid=int(row["rowid"]),
+            chat_id=int(row["chat_id"]),
+            guid=str(row["guid"] or ""),
+            sender=str(row["sender"] or ""),
+            text=str(row["text"] or ""),
+            date=_parse_dt(str(row["date"])),
+            is_from_me=bool(row["is_from_me"]),
+            service=str(row["service"] or ""),
+            has_attachments=bool(row["has_attachments"]),
+            reply_to_guid=row["reply_to_guid"] or None,
+            thread_originator_guid=row["thread_originator_guid"] or None,
+            destination_caller_id=row["destination_caller_id"] or None,
+            is_reaction=bool(row["is_reaction"]),
+            reaction_type=row["reaction_type"] or None,
+            chat_identifier=str(row["chat_identifier"] or ""),
+            chat_guid=str(row["chat_guid"] or ""),
+            chat_name=str(row["chat_name"] or ""),
+            participants=cls._loads_json_list(str(row["participants_json"] or "[]")),
+            is_group=bool(row["is_group"]),
+        )
 
     @classmethod
     def _add_json_identifiers(cls, values: set[str], json_text: str) -> None:

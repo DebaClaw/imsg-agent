@@ -201,9 +201,11 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ⬜ Saved views: unanswered, recently active, quiet relationships, attachment issues
 
 #### AI Action Layer
-- ⬜ Explicit AI triage command for ambiguous/unresolved conversations
+- ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor
+- ✅ `scripts/install_agent_worker_launchd.sh` — install worker as separate LaunchAgent
 - ⬜ AI summaries from archive data with per-chat isolation controls
-- ⬜ AI draft generation from archived context with manual approval by default
+- ✅ AI draft generation from archived context with manual approval by default
+- ⬜ Explicit AI triage command for ambiguous/unresolved conversations
 - ⬜ "Do the needful" workflow that produces reviewable actions, drafts, and rationale
 - ⬜ Policy gates for autonomous action by relationship, chat type, and professional status
 

@@ -31,6 +31,8 @@ database.
   `chats/{chat_id}/history.md` for the chat being handled.
 - **OpenAI drafting**: drafts are created through the OpenAI Responses API, with
   `gpt-5.5` as the default model and per-chat overrides available through `context.md`.
+- **Archive-backed AI worker**: `imsg-agent-worker` reads new inbound messages from the
+  SQLite archive, proposes reviewable drafts, and does not subscribe to iMessage itself.
 - **Manual and opt-in automatic approval**: drafts default to `approved: false`.
   Per-chat `auto_approve: true` can approve drafts automatically for non-professional
   one-on-one chats.
@@ -57,11 +59,14 @@ agent/
   archive_store.py SQLite archive schema and writes
   archiver.py     Non-GenAI archive backfill and monitor
   archive_main.py CLI for imsg-archive
+  archive_agent.py AI worker that consumes the SQLite archive
+  mcp_server.py    Read-only MCP server over the SQLite archive
   main.py         Runtime event loop
 
 config/imsg.json  Default local configuration
 scripts/setup.sh  Environment and data-directory setup
 scripts/install_launchd.sh  Install a user LaunchAgent for archive monitoring
+scripts/install_agent_worker_launchd.sh  Install archive-backed AI worker service
 tests/            Unit tests with fixtures, no live Messages database required
 ```
 
@@ -198,6 +203,39 @@ Stop it with:
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.imsg-agent.archive-monitor.plist
 ```
 
+## Archive-Backed AI Worker
+
+The recommended service split is:
+
+- `imsg-archive monitor`: no-AI ingestion from `imsg rpc` into SQLite.
+- `imsg-agent-worker`: AI/action worker that reads SQLite, proposes drafts, and optionally
+  sends already-approved outbox items.
+
+Run the worker in the foreground:
+
+```bash
+uv run imsg-agent-worker
+```
+
+Install it as a separate user LaunchAgent:
+
+```bash
+cd ~/src/imsg-agent
+bash scripts/install_agent_worker_launchd.sh
+```
+
+Use draft-only mode when you want the worker to propose replies but never execute the
+approved outbox sender:
+
+```bash
+bash scripts/install_agent_worker_launchd.sh --no-send
+```
+
+The worker uses its own SQLite cursor, stored as `agent_draft_cursor` in the archive
+`meta` table. It does not change the archive monitor cursor. Per-chat relationship
+policy remains human-editable in `~/imsg-data/chats/{chat_id}/context.md`; the worker
+uses SQLite for message history and only reads the target chat's context file.
+
 Fetch attachment metadata and copy available attachment files for archived messages:
 
 ```bash
@@ -329,6 +367,20 @@ sqlite3 ~/imsg-data/imessage.sqlite \
 ```
 
 ## Approval Workflow
+
+1. `imsg-archive monitor` writes a new inbound message to SQLite.
+2. `imsg-agent-worker` sees it using the worker's `agent_draft_cursor`.
+3. The drafter reads only that chat's `context.md` plus SQLite history for that chat.
+4. A draft appears in `~/imsg-data/chats/{chat_id}/drafts/{uuid}.md`.
+5. The operator reviews or edits the draft.
+6. Setting `approved: true` moves the draft to `outbox/` on the next worker pass.
+7. The sender archives the message to `sent/` before calling `imsg rpc send`.
+8. If the send fails, the archive is moved to `errors/` with the failure reason.
+
+The legacy `imsg-agent` runtime can still ingest into markdown inbox files directly, but
+the archive-backed worker is the preferred path when `imsg-archive monitor` is running.
+
+Legacy file-ingest flow:
 
 1. A new inbound message is written to `~/imsg-data/inbox/`.
 2. The drafter reads only that chat's `context.md` and `history.md`.

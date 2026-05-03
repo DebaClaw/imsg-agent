@@ -39,13 +39,13 @@ The system must be:
                          │ subprocess pipe
                          ▼
 ┌─────────────────────────────────────────────────────────┐
-│                  imsg-agent runtime                      │
+│                  imsg-agent services                     │
 │              (this project, Python)                     │
 │                                                         │
-│  rpc_client.py  →  inbox.py  →  drafter.py             │
-│                 →  sender.py                            │
-│                 →  store.py  (~/imsg-data/)             │
-│                 →  archive_store.py (SQLite archive)    │
+│  archiver.py     →  archive_store.py (SQLite archive)   │
+│  archive_agent.py → drafter.py → store.py (drafts)      │
+│  sender.py       →  imsg rpc send                       │
+│  mcp_server.py   →  archive_store.py (read-only tools)  │
 └────────────────────────┬────────────────────────────────┘
                          │ reads/writes markdown files + SQLite archive
                          ▼
@@ -256,8 +256,9 @@ messages). The AI drafter receives both as context.
 - **Owns the ingest half of the lifecycle**
 
 ### `drafter.py`
-- Reads unprocessed inbox files
-- Builds context: `context.md` + `history.md` for the chat
+- Reads unprocessed inbox files in the legacy runtime, or archived `Message` objects in the
+  archive-backed worker
+- Builds context from the target chat's `context.md` plus either `history.md` or SQLite history
 - Calls the OpenAI Responses API with a system prompt + context + new message
 - Writes `chats/{chatID}/drafts/{uuid}.md` with `approved: false`
 - **The only module that calls an external AI API**
@@ -272,9 +273,16 @@ messages). The AI drafter receives both as context.
 
 ### `main.py`
 - Initializes all modules
-- Runs the agent loop: wake → poll → ingest → draft → send → checkpoint → sleep
+- Runs the legacy file-ingest agent loop: wake → poll → ingest → draft → send → checkpoint → sleep
 - Handles OS signals (SIGTERM: finish current batch, checkpoint, exit cleanly)
 - Configures logging
+
+### `archive_agent.py`
+- Runs the preferred archive-backed AI worker
+- Reads new inbound messages from `archive_store.py` using a separate `agent_draft_cursor`
+- Uses SQLite history plus only the target chat's `context.md` to propose drafts
+- Does not subscribe to `imsg rpc`; it depends on `imsg-archive monitor` for ingestion
+- Optionally executes already-approved outbox items through `sender.py`
 
 ### `archive_store.py`
 - Maintains `~/imsg-data/imessage.sqlite`
@@ -302,21 +310,16 @@ messages). The AI drafter receives both as context.
 imsg rpc
   │
   │ JSON notifications (new messages)
-  ├──────────────────────────────────────────────┐
-  ▼                                              ▼
-inbox.py                                      archiver.py
-  │                                              │
-  │ Message objects                              │ idempotent upserts
-  ▼                                              ▼
-store.py                                     archive_store.py
-  │                                              │
-  │ write inbox/{rowid}-{chatID}.md              │ imessage.sqlite
-  │ update chats/{chatID}/context.md             │ search / recent / attention
-  │ append chats/{chatID}/history.md             │ contacts / attachments
   ▼
-drafter.py
-  │
-  │ read context.md + history.md
+archiver.py
+  │ idempotent upserts
+  ▼
+archive_store.py ─────► imessage.sqlite
+  │                       search / recent / attention / MCP
+  │ new inbound rows
+  ▼
+archive_agent.py
+  │ read target context.md + SQLite chat history
   │ call OpenAI Responses API
   │
   ▼
@@ -388,6 +391,8 @@ Even if cursor is wrong, the same message won't generate a second inbox file or 
 - `archive_store.py` maintains `~/imsg-data/imessage.sqlite` for historical messages,
   attachments, reactions, contacts, search, and deterministic attention ranking.
 - `archiver.py` backfills and monitors the archive through `imsg rpc`.
+- `archive_agent.py` consumes the archive through its own `agent_draft_cursor` and writes
+  reviewable drafts.
 - Markdown remains the source of truth for draft approval, outbox, sent archives, and errors.
 - SQLite is the source of truth for archive/search/visibility surfaces.
 

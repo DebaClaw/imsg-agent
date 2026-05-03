@@ -32,6 +32,7 @@ dev = []
 
 [project.scripts]
 imsg-agent = "agent.main:cli"
+imsg-agent-worker = "agent.archive_agent:cli"
 imsg-archive = "agent.archive_main:cli"
 imsg-mcp = "agent.mcp_server:cli"
 
