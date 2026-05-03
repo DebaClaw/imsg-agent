@@ -18,6 +18,8 @@ from dotenv import load_dotenv
 
 from .archive_store import IMessageArchive
 from .config import Config, load_config
+from .pending_report import pending_replies
+from .store import MessageStore
 
 logger = logging.getLogger(__name__)
 JSON = dict[str, Any]
@@ -91,6 +93,11 @@ TOOLS: list[JSON] = [
         {"limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}},
     ),
     _tool(
+        "pending_replies",
+        "List latest-inbound chats with matching proposed replies when present.",
+        {"limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 5}},
+    ),
+    _tool(
         "search_messages",
         "Full-text search archived messages.",
         {
@@ -127,8 +134,9 @@ TOOLS: list[JSON] = [
 
 
 class IMsgMCPServer:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, data_dir: Path | None = None) -> None:
         self._db_path = db_path
+        self._data_dir = data_dir or db_path.parent
 
     def handle(self, message: JSON) -> JSON | None:
         method = str(message.get("method") or "")
@@ -196,6 +204,14 @@ class IMsgMCPServer:
                 )
             if name == "needs_reply":
                 return _text_result(archive.needs_reply(limit=_limit(arguments.get("limit"), 50)))
+            if name == "pending_replies":
+                return _text_result(
+                    pending_replies(
+                        archive,
+                        MessageStore(self._data_dir),
+                        limit=_limit(arguments.get("limit"), 5),
+                    )
+                )
             if name == "search_messages":
                 query = str(arguments.get("query") or "").strip()
                 if not query:
@@ -311,7 +327,7 @@ def cli() -> None:
     )
     config = load_config()
     db_path = Path(args.db or archive_db_path(config)).expanduser()
-    serve_stdio(IMsgMCPServer(db_path))
+    serve_stdio(IMsgMCPServer(db_path, config.data_dir))
 
 
 if __name__ == "__main__":

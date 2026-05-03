@@ -60,6 +60,7 @@ def test_archive_cli_has_visibility_commands() -> None:
     recent = _parser().parse_args(["recent", "--limit", "5"])
     attention = _parser().parse_args(["attention", "--limit", "7", "--json"])
     needs_reply = _parser().parse_args(["needs-reply", "--limit", "10", "--json"])
+    pending = _parser().parse_args(["pending", "--limit", "5", "--json"])
     unresolved = _parser().parse_args(["unresolved"])
     attachment_issues = _parser().parse_args(["attachment-issues"])
     search = _parser().parse_args(
@@ -76,6 +77,9 @@ def test_archive_cli_has_visibility_commands() -> None:
     assert needs_reply.command == "needs-reply"
     assert needs_reply.limit == 10
     assert needs_reply.json_output is True
+    assert pending.command == "pending"
+    assert pending.limit == 5
+    assert pending.json_output is True
     assert unresolved.command == "unresolved"
     assert attachment_issues.command == "attachment-issues"
     assert search.command == "search"

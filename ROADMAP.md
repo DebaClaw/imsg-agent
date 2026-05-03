@@ -119,29 +119,32 @@ configurable policies (auto-approve for certain chats, different tones per conta
 
 ---
 
-## Phase 4 — Storage: SQLite Index
+## Phase 4 — Storage: SQLite Archive and Query Layer
 
-**Goal:** Add a queryable index over the markdown data so the agent can answer questions like
-"what did I last say to person X" or "find all unanswered messages."
+**Goal:** Maintain a queryable SQLite archive so the operator and agent can answer questions
+like "what did I last say to person X" or "find conversations that need a reply."
 
-Note: `agent/archive_store.py` now provides a no-GenAI SQLite archive for chats, messages,
-attachment metadata, and reactions. Phase 4 remains about adding richer query APIs and
-rebuild/index tooling on top of persistent local data.
+Markdown remains the approval/drafting artifact store. SQLite is the archive/search/visibility
+source and the preferred input for the archive-backed AI worker.
 
 **Exit criteria:**
-- `store_index.py` maintains a SQLite DB in `~/imsg-data/index.db`
-- Index is rebuilt from markdown files in <5 seconds for 10k messages
-- All queries in drafter/summarizer use the index, not filesystem traversal
-- Markdown files remain the source of truth; index is a projection
+- `archive_store.py` maintains `~/imsg-data/imessage.sqlite`
+- Archive monitor updates SQLite incrementally from `imsg rpc`
+- Query methods support recent chats, needs-reply, attention, search, chat history,
+  contacts, and attachment issue views
+- Archive-backed AI worker reads SQLite instead of subscribing to `imsg rpc`
+- Markdown files remain the source of truth for drafts, approvals, sent archives, and errors
 
 ### Tasks
 
 - ✅ `agent/archive_store.py` — schema for chats, messages, attachments, reactions, cursor
-- ⬜ Query API for unanswered messages, participants, and chat activity
-- ⬜ `scripts/rebuild_index.py` — full rebuild from markdown files
+- ✅ Query API for recent chats, needs-reply, attention, search, and chat history
 - ✅ Incremental archive update from `imsg-archive monitor`
 - ✅ Backfill from `imsg rpc messages.history`
-- ⬜ Query methods: `unanswered_messages()`, `messages_by_participant()`, `chats_by_last_active()`
+- ✅ `imsg-mcp` read-only MCP surface over archive queries
+- ✅ Archive-backed draft worker consumes SQLite with an independent cursor
+- ⬜ Query methods: `messages_by_participant()`, `chats_by_last_active()`
+- ⬜ Rebuild/repair tooling for archive projections if schema/query projections change
 
 ---
 
@@ -188,6 +191,7 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ✅ `imsg-archive search messages` — FTS-backed archived message search
 - ✅ `imsg-archive attention` — deterministic no-AI ranking for reply awareness
 - ✅ `imsg-archive needs-reply` — chats where the latest archived message is inbound
+- ✅ `imsg-archive pending` — latest-inbound messages with matching proposed replies
 - ✅ `imsg-archive unresolved` — contact match gaps for review
 - ✅ `imsg-archive attachment-issues` — attachments that were not copied locally
 - ✅ `imsg-mcp` — read-only MCP tools over the SQLite archive
@@ -195,9 +199,10 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ⬜ Resumable attachment repair state for large attachment recovery jobs
 
 #### Management Interfaces
+- ✅ `imsg-agentctl` — installed operator CLI for status, reports, services, logs, and queues
 - ⬜ TUI dashboard for communications awareness and triage
 - ⬜ Local web interface for archive browsing and communication management
-- 🔄 Shared read-only service/query layer for CLI, TUI, and web
+- ✅ Shared read-only service/query layer for CLI, MCP, TUI, and web
 - ⬜ Saved views: unanswered, recently active, quiet relationships, attachment issues
 
 #### AI Action Layer

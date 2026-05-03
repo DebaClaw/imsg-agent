@@ -19,7 +19,9 @@ from .archive_store import IMessageArchive
 from .archiver import IMessageArchiver
 from .config import Config, load_config
 from .contact_enrichment import contacts_from_json, load_contacts_from_contacts_mcp
+from .pending_report import pending_replies
 from .rpc_client import IMsgRPCClient
+from .store import MessageStore
 
 logger = logging.getLogger(__name__)
 Column = tuple[str, str]
@@ -233,6 +235,32 @@ def run_needs_reply(args: argparse.Namespace) -> None:
         archive.close()
 
 
+def run_pending(args: argparse.Namespace) -> None:
+    config = load_config()
+    archive = IMessageArchive(Path(args.db or archive_db_path(config)))
+    store = MessageStore(config.data_dir)
+    try:
+        rows = pending_replies(archive, store, limit=args.limit)
+        _print_rows(
+            rows,
+            [
+                ("score", "score"),
+                ("chat_id", "chat"),
+                ("message_rowid", "message"),
+                ("last_message_at", "last_message_at"),
+                ("name", "name"),
+                ("contacts", "contacts"),
+                ("last_text", "last_text"),
+                ("draft_status", "draft_status"),
+                ("proposed_text", "proposed_reply"),
+                ("reasoning", "reasoning"),
+            ],
+            json_output=args.json_output,
+        )
+    finally:
+        archive.close()
+
+
 def run_unresolved(args: argparse.Namespace) -> None:
     config = load_config()
     archive = IMessageArchive(Path(args.db or archive_db_path(config)))
@@ -428,6 +456,10 @@ def _parser() -> argparse.ArgumentParser:
         "needs-reply",
         help="List chats where the latest archived message is inbound",
     )
+    pending = subparsers.add_parser(
+        "pending",
+        help="List latest-inbound chats with matching proposed replies when present",
+    )
     unresolved = subparsers.add_parser(
         "unresolved",
         help="List chat identifiers not matched to Contacts",
@@ -439,7 +471,7 @@ def _parser() -> argparse.ArgumentParser:
     for subparser in (backfill, monitor, attachments, run):
         _add_options(subparser, defaults=False)
     _add_read_only_options(stats)
-    for subparser in (recent, attention, needs_reply, unresolved, attachment_issues):
+    for subparser in (recent, attention, needs_reply, pending, unresolved, attachment_issues):
         _add_limited_read_only_options(subparser)
     search_subparsers = search.add_subparsers(
         dest="search_command_name",
@@ -528,6 +560,8 @@ def cli() -> None:
             run_search_messages(args)
     elif args.command == "needs-reply":
         run_needs_reply(args)
+    elif args.command == "pending":
+        run_pending(args)
     elif args.command == "unresolved":
         run_unresolved(args)
     elif args.command == "attachment-issues":

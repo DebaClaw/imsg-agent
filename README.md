@@ -19,7 +19,8 @@ database.
 - **Local SQLite archive**: `imsg-archive` stores chats, messages, attachment metadata,
   reactions, and a live cursor in `~/imsg-data/imessage.sqlite`.
 - **Archive visibility CLI**: read-only commands show archive totals, recent chats,
-  unanswered inbound conversations, unresolved contact matches, and attachment issues.
+  unanswered inbound conversations, pending proposed replies, unresolved contact
+  matches, and attachment issues.
 - **Message search and attention queue**: FTS-backed message search and deterministic
   no-AI attention ranking help answer what needs a reply now.
 - **No-GenAI archive mode**: archive backfill and monitoring do not import or call the
@@ -33,6 +34,8 @@ database.
   `gpt-5.5` as the default model and per-chat overrides available through `context.md`.
 - **Archive-backed AI worker**: `imsg-agent-worker` reads new inbound messages from the
   SQLite archive, proposes reviewable drafts, and does not subscribe to iMessage itself.
+- **Operator CLI**: `imsg-agentctl` provides one installed command for status, reports,
+  pending proposals, logs, service control, and archive visibility views.
 - **Manual and opt-in automatic approval**: drafts default to `approved: false`.
   Per-chat `auto_approve: true` can approve drafts automatically for non-professional
   one-on-one chats.
@@ -61,6 +64,7 @@ agent/
   archive_main.py CLI for imsg-archive
   archive_agent.py AI worker that consumes the SQLite archive
   mcp_server.py    Read-only MCP server over the SQLite archive
+  manage_cli.py    Operator CLI for managing and reporting on the system
   main.py         Runtime event loop
 
 config/imsg.json  Default local configuration
@@ -98,6 +102,29 @@ Use `uv` for all Python commands:
 ```bash
 cd ~/src/imsg-agent
 uv sync
+```
+
+To make the project commands available from any directory without typing `uv run`, install
+the repo as an editable `uv` tool:
+
+```bash
+uv tool install --editable "${HOME}/src/imsg-agent"
+uv tool update-shell
+```
+
+Restart your shell after `uv tool update-shell`, then verify:
+
+```bash
+imsg-agentctl --help
+imsg-archive --help
+imsg-agent-worker --help
+imsg-mcp --help
+```
+
+If you later pull changes that add or rename console scripts, rerun:
+
+```bash
+uv tool install --reinstall --editable "${HOME}/src/imsg-agent"
 ```
 
 ### 3. Configure environment
@@ -236,6 +263,37 @@ The worker uses its own SQLite cursor, stored as `agent_draft_cursor` in the arc
 policy remains human-editable in `~/imsg-data/chats/{chat_id}/context.md`; the worker
 uses SQLite for message history and only reads the target chat's context file.
 
+## Operator CLI
+
+Use `imsg-agentctl` as the day-to-day management and reporting command. It is installed
+as a console script by `uv sync` and can also be run through `uv run`.
+
+```bash
+uv run imsg-agentctl status
+uv run imsg-agentctl report --limit 5
+uv run imsg-agentctl pending --limit 5
+uv run imsg-agentctl pending --limit 5 --json
+uv run imsg-agentctl attention --limit 25
+uv run imsg-agentctl recent --limit 25
+uv run imsg-agentctl search "coffee saturday" --limit 25
+uv run imsg-agentctl unresolved --limit 50
+uv run imsg-agentctl attachment-issues --limit 50
+```
+
+Service helpers wrap the two LaunchAgents installed by the setup scripts:
+
+```bash
+uv run imsg-agentctl service status
+uv run imsg-agentctl service restart monitor
+uv run imsg-agentctl service restart worker
+uv run imsg-agentctl logs monitor --lines 80
+uv run imsg-agentctl logs worker --errors --lines 80
+```
+
+`pending` joins the deterministic latest-inbound queue with matching draft/outbox/sent/error
+artifacts by `source_rowid`, so it answers "what needs a reply and what did the agent
+propose?" without approving or sending anything.
+
 Fetch attachment metadata and copy available attachment files for archived messages:
 
 ```bash
@@ -273,6 +331,7 @@ uv run imsg-archive attention --limit 25
 uv run imsg-archive search messages "coffee saturday" --limit 25
 uv run imsg-archive search messages "coffee" --chat-id 41 --since 2026-01-01
 uv run imsg-archive needs-reply --limit 50
+uv run imsg-archive pending --limit 5
 uv run imsg-archive unresolved --limit 50
 uv run imsg-archive attachment-issues --limit 50
 uv run imsg-archive attention --json
@@ -313,12 +372,16 @@ uv run imsg-archive recent --limit 25
 uv run imsg-archive attention --limit 25
 uv run imsg-archive search messages "coffee saturday" --limit 25
 uv run imsg-archive needs-reply --limit 50
+uv run imsg-archive pending --limit 5
 uv run imsg-archive unresolved --limit 50
 uv run imsg-archive attachment-issues --limit 50
 ```
 
 `attention` is deterministic: it scores latest-inbound chats using reply state, age,
 questions, Contacts matches, attachments, and group-chat status. It does not call AI.
+`pending` shows that same latest-inbound queue with any matching draft, outbox, sent, or
+error artifact for the triggering message's `source_rowid`; use `--json` to get full
+proposed reply text and draft paths.
 `search messages` uses SQLite FTS5 and can be narrowed with `--chat-id`, `--since`, and
 `--until`. Add `--json` to use output from other scripts.
 
@@ -349,6 +412,7 @@ Available tools:
 - `recent_chats`
 - `attention`
 - `needs_reply`
+- `pending_replies`
 - `search_messages`
 - `get_chat_messages`
 - `unresolved_contacts`
