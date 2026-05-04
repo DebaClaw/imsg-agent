@@ -572,6 +572,40 @@ class IMessageArchive:
         ).fetchall()
         return [self._message_from_row(row) for row in rows]
 
+    def message_by_rowid(self, rowid: int) -> Message | None:
+        row = self._db.execute(
+            """
+            SELECT
+                m.rowid, m.chat_id, m.guid, m.sender, m.text, m.date, m.is_from_me,
+                m.service, m.has_attachments, m.reply_to_guid,
+                m.thread_originator_guid, m.destination_caller_id, m.is_reaction,
+                m.reaction_type, m.chat_identifier, m.chat_guid, m.chat_name,
+                m.participants_json, m.is_group
+            FROM messages m
+            WHERE m.rowid = ?
+            """,
+            (rowid,),
+        ).fetchone()
+        return self._message_from_row(row) if row is not None else None
+
+    def latest_message_for_chat(self, chat_id: int) -> Message | None:
+        row = self._db.execute(
+            """
+            SELECT
+                m.rowid, m.chat_id, m.guid, m.sender, m.text, m.date, m.is_from_me,
+                m.service, m.has_attachments, m.reply_to_guid,
+                m.thread_originator_guid, m.destination_caller_id, m.is_reaction,
+                m.reaction_type, m.chat_identifier, m.chat_guid, m.chat_name,
+                m.participants_json, m.is_group
+            FROM messages m
+            WHERE m.chat_id = ?
+            ORDER BY m.date DESC, m.rowid DESC
+            LIMIT 1
+            """,
+            (chat_id,),
+        ).fetchone()
+        return self._message_from_row(row) if row is not None else None
+
     def chat_context_seed(self, chat_id: int) -> ArchiveRow:
         row = self._db.execute(
             """

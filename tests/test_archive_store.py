@@ -141,6 +141,30 @@ def test_archive_reports_oldest_message_for_chat(tmp_path: Path) -> None:
     archive.close()
 
 
+def test_archive_fetches_messages_for_manual_drafting(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    older = _message(rowid=100)
+    older.text = "Earlier"
+    newer = _message(rowid=101)
+    newer.text = "Latest"
+    newer.date = datetime(2026, 4, 25, 13, 0, 0, tzinfo=UTC)
+    archive.upsert_message(older)
+    archive.upsert_message(newer)
+
+    exact = archive.message_by_rowid(100)
+    latest = archive.latest_message_for_chat(7)
+
+    assert exact is not None
+    assert exact.text == "Earlier"
+    assert latest is not None
+    assert latest.rowid == 101
+    assert latest.text == "Latest"
+    assert archive.message_by_rowid(999) is None
+    assert archive.latest_message_for_chat(999) is None
+    archive.close()
+
+
 def test_archive_syncs_contacts_and_enriches_chats(tmp_path: Path) -> None:
     archive = IMessageArchive(tmp_path / "imessage.sqlite")
     archive.upsert_chat(_chat())

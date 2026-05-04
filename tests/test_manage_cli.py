@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 from agent.archive_store import IMessageArchive
-from agent.manage_cli import _parser, log_path, run_logs, run_pending, service_status
+from agent.drafter import DraftResponse
+from agent.manage_cli import _parser, log_path, run_draft, run_logs, run_pending, service_status
 from agent.models import Chat, Draft, Message
 from agent.store import MessageStore
 
@@ -41,9 +42,27 @@ def _message(rowid: int = 100) -> Message:
     )
 
 
+class FakeOpenAIResponsesDraftingClient:
+    def __init__(self, api_key: str | None = None) -> None:
+        self.api_key = api_key
+
+    async def create_draft(
+        self,
+        *,
+        model: str,
+        instructions: str,
+        input_text: str,
+    ) -> DraftResponse:
+        return DraftResponse(
+            proposed_text="Yep, I can help with that.",
+            reasoning="Manual CLI draft requested.",
+        )
+
+
 def test_manage_cli_accepts_operator_commands() -> None:
     pending = _parser().parse_args(["pending", "--limit", "5", "--json"])
     report = _parser().parse_args(["report", "--limit", "3", "--issue-limit", "2"])
+    draft = _parser().parse_args(["draft", "--chat-id", "7", "--json"])
     search = _parser().parse_args(["search", "coffee", "--chat-id", "7"])
     service = _parser().parse_args(["service", "restart", "worker"])
     logs = _parser().parse_args(["logs", "monitor", "--errors", "--lines", "20"])
@@ -53,6 +72,9 @@ def test_manage_cli_accepts_operator_commands() -> None:
     assert pending.json_output is True
     assert report.command == "report"
     assert report.issue_limit == 2
+    assert draft.command == "draft"
+    assert draft.chat_id == 7
+    assert draft.json_output is True
     assert search.command == "search"
     assert search.query == "coffee"
     assert search.chat_id == 7
@@ -95,6 +117,56 @@ def test_manage_pending_prints_matching_proposed_reply(
     output = capsys.readouterr().out
     assert "draft_unapproved" in output
     assert "Yep, I can help with that." in output
+
+
+def test_manage_draft_creates_proposal_for_chat(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "imessage.sqlite"
+    archive = IMessageArchive(db_path)
+    archive.upsert_chat(_chat())
+    archive.upsert_message(_message())
+    archive.close()
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "agent.manage_cli.OpenAIResponsesDraftingClient",
+        FakeOpenAIResponsesDraftingClient,
+    )
+    args = _parser().parse_args(
+        ["draft", "--chat-id", "7", "--db", str(db_path), "--data-dir", str(tmp_path)]
+    )
+
+    run_draft(args)
+
+    output = capsys.readouterr().out
+    assert "status: draft_created" in output
+    assert "Yep, I can help with that." in output
+    assert MessageStore(tmp_path).draft_exists_for_source(7, 100)
+
+
+def test_manage_draft_skips_chat_when_latest_message_is_from_me(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "imessage.sqlite"
+    archive = IMessageArchive(db_path)
+    archive.upsert_chat(_chat())
+    mine = _message()
+    mine.is_from_me = True
+    archive.upsert_message(mine)
+    archive.close()
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    args = _parser().parse_args(
+        ["draft", "--chat-id", "7", "--db", str(db_path), "--data-dir", str(tmp_path)]
+    )
+
+    run_draft(args)
+
+    output = capsys.readouterr().out
+    assert "Latest message is not an inbound reply target" in output
 
 
 def test_manage_logs_reads_configured_log_path(

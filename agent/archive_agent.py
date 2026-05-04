@@ -25,6 +25,7 @@ from .drafter import (
     DraftingRateLimitError,
     OpenAIResponsesDraftingClient,
 )
+from .models import Draft, Message
 from .rpc_client import IMsgRPCClient
 from .sender import ApprovalScanner, Sender
 from .store import MessageStore
@@ -56,13 +57,7 @@ class ArchiveAgentWorker:
         processed = 0
         cursor = self._archive.read_agent_cursor()
         for message in self._archive.inbound_messages_after(cursor, limit=limit):
-            self._ensure_chat_context(message.chat_id, source_rowid=message.rowid)
-            history = self._archive.chat_history_markdown(
-                message.chat_id,
-                through_rowid=message.rowid,
-                limit=self._history_limit,
-            )
-            await self._drafter.process_message(message, history_override=history)
+            await self.draft_archived_message(message)
             self._archive.write_agent_cursor(message.rowid)
             processed += 1
             logger.info(
@@ -71,6 +66,17 @@ class ArchiveAgentWorker:
                 message.chat_id,
             )
         return processed
+
+    async def draft_archived_message(self, message: Message) -> Draft | None:
+        if self._drafter is None:
+            return None
+        self._ensure_chat_context(message.chat_id, source_rowid=message.rowid)
+        history = self._archive.chat_history_markdown(
+            message.chat_id,
+            through_rowid=message.rowid,
+            limit=self._history_limit,
+        )
+        return await self._drafter.process_message(message, history_override=history)
 
     def _ensure_chat_context(self, chat_id: int, *, source_rowid: int) -> None:
         context, body = self._store.read_chat_context_document(chat_id)

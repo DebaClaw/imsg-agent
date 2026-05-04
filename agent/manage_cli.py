@@ -7,6 +7,7 @@ and MCP commands. It does not send messages or approve drafts.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import subprocess
@@ -15,9 +16,12 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from .archive_agent import ArchiveAgentWorker
 from .archive_store import ArchiveRow, IMessageArchive
 from .config import Config, load_config
-from .pending_report import pending_replies
+from .drafter import Drafter, OpenAIResponsesDraftingClient
+from .models import Draft, Message
+from .pending_report import _decorate_pending_row, pending_replies
 from .store import MessageStore
 
 JSON = dict[str, Any]
@@ -238,6 +242,58 @@ def run_attachment_issues(args: argparse.Namespace) -> None:
     )
 
 
+def run_draft(args: argparse.Namespace) -> None:
+    config = load_config()
+    if not config.openai_api_key:
+        raise SystemExit("OPENAI_API_KEY is not set; cannot draft")
+    db_path = _db_path(args, config)
+    data_dir = _data_dir(args, config)
+    with IMessageArchive(db_path) as archive:
+        message = _draft_target_message(archive, args)
+        if message is None:
+            raise SystemExit("No target message found")
+        if args.chat_id is not None and (message.is_from_me or message.is_reaction):
+            print(
+                "Latest message is not an inbound reply target; "
+                f"rowid={message.rowid} is_from_me={message.is_from_me}"
+            )
+            return
+        store = MessageStore(data_dir)
+        drafter = Drafter(
+            store,
+            OpenAIResponsesDraftingClient(api_key=config.openai_api_key),
+            default_model=config.draft_model,
+            max_inbox_age_hours=config.max_inbox_age_hours if args.respect_age else 0,
+            auto_approve_default=config.auto_approve,
+        )
+        worker = ArchiveAgentWorker(
+            archive=archive,
+            store=store,
+            drafter=drafter,
+            history_limit=config.chat_context_messages,
+        )
+        draft = asyncio.run(worker.draft_archived_message(message))
+        payload = _draft_result_payload(
+            store,
+            message=message,
+            draft=draft,
+        )
+    if args.json_output:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    print(f"chat_id: {payload['chat_id']}")
+    print(f"message_rowid: {payload['message_rowid']}")
+    print(f"status: {payload['status']}")
+    if payload.get("draft_path"):
+        print(f"draft_path: {payload['draft_path']}")
+    if payload.get("proposed_text"):
+        print()
+        print(str(payload["proposed_text"]))
+    if payload.get("reasoning"):
+        print()
+        print(f"reasoning: {payload['reasoning']}")
+
+
 def run_service(args: argparse.Namespace) -> None:
     if args.service_command_name == "status":
         services = [args.service] if args.service else ["monitor", "worker"]
@@ -352,6 +408,77 @@ def log_path(service: str, *, data_dir: Path, errors: bool) -> Path:
     else:
         raise SystemExit(f"unknown service: {service}")
     return data_dir / "logs" / name
+
+
+def _draft_target_message(archive: IMessageArchive, args: argparse.Namespace) -> Message | None:
+    if args.message_rowid is not None:
+        return archive.message_by_rowid(int(args.message_rowid))
+    if args.chat_id is not None:
+        return archive.latest_message_for_chat(int(args.chat_id))
+    return None
+
+
+def _draft_result_payload(
+    store: MessageStore,
+    *,
+    message: Message,
+    draft: Draft | None,
+) -> JSON:
+    if draft is not None:
+        return {
+            "status": "draft_created",
+            "chat_id": message.chat_id,
+            "message_rowid": message.rowid,
+            "draft_uuid": draft.uuid,
+            "draft_path": str(
+                store.data_dir / "chats" / str(draft.chat_id) / "drafts" / f"{draft.uuid}.md"
+            ),
+            "proposed_text": draft.proposed_text,
+            "reasoning": draft.reasoning,
+            "approved": draft.approved,
+        }
+    artifact = _reply_artifact_for_source(
+        store,
+        chat_id=message.chat_id,
+        source_rowid=message.rowid,
+    )
+    if artifact is not None:
+        return {
+            "status": str(artifact.get("draft_status") or "handled"),
+            "chat_id": message.chat_id,
+            "message_rowid": message.rowid,
+            "draft_uuid": str(artifact.get("draft_uuid") or ""),
+            "draft_path": str(artifact.get("draft_path") or ""),
+            "proposed_text": str(artifact.get("proposed_text") or ""),
+            "reasoning": str(artifact.get("reasoning") or ""),
+        }
+    return {
+        "status": "skipped",
+        "chat_id": message.chat_id,
+        "message_rowid": message.rowid,
+        "draft_uuid": "",
+        "draft_path": "",
+        "proposed_text": "",
+        "reasoning": "",
+    }
+
+
+def _reply_artifact_for_source(
+    store: MessageStore,
+    *,
+    chat_id: int,
+    source_rowid: int,
+) -> ArchiveRow | None:
+    decorated = _decorate_pending_row(
+        {
+            "chat_id": chat_id,
+            "message_rowid": source_rowid,
+        },
+        store,
+    )
+    if decorated.get("draft_status") != "missing":
+        return decorated
+    return None
 
 
 def _run_launchctl(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -485,6 +612,17 @@ def _parser() -> argparse.ArgumentParser:
     needs_reply = subparsers.add_parser("needs-reply", help="List latest-inbound chats")
     _add_limited_options(needs_reply, default=50)
 
+    draft = subparsers.add_parser("draft", help="Draft against a specific chat or message now")
+    _add_data_options(draft)
+    target = draft.add_mutually_exclusive_group(required=True)
+    target.add_argument("--chat-id", type=int, help="Draft for the latest message in this chat")
+    target.add_argument("--message-rowid", type=int, help="Draft for an exact archived message")
+    draft.add_argument(
+        "--respect-age",
+        action="store_true",
+        help="Apply max_inbox_age_hours; by default manual drafting ignores message age",
+    )
+
     search = subparsers.add_parser("search", help="Search archived messages")
     _add_limited_options(search, default=25)
     search.add_argument("query")
@@ -535,6 +673,8 @@ def cli() -> None:
         run_attention(args)
     elif args.command == "needs-reply":
         run_needs_reply(args)
+    elif args.command == "draft":
+        run_draft(args)
     elif args.command == "search":
         run_search(args)
     elif args.command == "unresolved":

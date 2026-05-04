@@ -273,6 +273,8 @@ uv run imsg-agentctl status
 uv run imsg-agentctl report --limit 5
 uv run imsg-agentctl pending --limit 5
 uv run imsg-agentctl pending --limit 5 --json
+uv run imsg-agentctl draft --chat-id 742
+uv run imsg-agentctl draft --message-rowid 97821
 uv run imsg-agentctl attention --limit 25
 uv run imsg-agentctl recent --limit 25
 uv run imsg-agentctl search "coffee saturday" --limit 25
@@ -295,6 +297,20 @@ artifacts by `source_rowid`, so it answers "what needs a reply and what did the 
 propose?" without approving or sending anything. Missing draft items older than
 `max_inbox_age_hours` are filtered out because the worker will not draft them. AI no-reply
 decisions are recorded under `~/imsg-data/no_reply/` and are not shown as pending.
+
+Use `draft` when you want to manually ask the AI worker to reconsider one conversation or
+one exact archived message immediately:
+
+```bash
+uv run imsg-agentctl draft --chat-id 742
+uv run imsg-agentctl draft --message-rowid 97821 --json
+```
+
+For `--chat-id`, the command drafts only when the latest archived message in that chat is
+an inbound non-reaction. For `--message-rowid`, it targets that exact archived message.
+Manual drafting ignores `max_inbox_age_hours` by default so the AI can still decide whether
+an older time-sensitive message is logically stale and write a `no_reply/` decision. Add
+`--respect-age` to apply the normal background-worker age cutoff.
 
 Fetch attachment metadata and copy available attachment files for archived messages:
 
