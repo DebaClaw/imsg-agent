@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 
 from .archive_store import IMessageArchive
 from .config import Config, load_config
-from .drafter import Drafter, OpenAIResponsesDraftingClient
+from .drafter import Drafter, DraftingRateLimitError, OpenAIResponsesDraftingClient
 from .rpc_client import IMsgRPCClient
 from .sender import ApprovalScanner, Sender
 from .store import MessageStore
@@ -148,6 +148,15 @@ async def run(config: Config, *, db_path: Path | None = None, no_send: bool = Fa
                 approval.run_pass()
                 if sender is not None:
                     await sender.run_pass()
+            except DraftingRateLimitError as exc:
+                retry_after = max(exc.retry_after_seconds, config.maintenance_interval_seconds)
+                logger.warning(
+                    "Drafting rate limited; pausing worker for %.1fs before retrying",
+                    retry_after,
+                )
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(stop_event.wait(), timeout=retry_after)
+                continue
             except Exception:
                 logger.exception("Archive-backed agent worker pass failed")
             with suppress(TimeoutError):

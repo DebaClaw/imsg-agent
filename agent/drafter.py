@@ -42,6 +42,14 @@ class DraftingClient(Protocol):
         """Return a draft response from a model provider."""
 
 
+class DraftingRateLimitError(RuntimeError):
+    """Raised when the model provider asks the worker to slow down."""
+
+    def __init__(self, message: str, *, retry_after_seconds: float = 60.0) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 class OpenAIResponsesDraftingClient:
     """Small adapter around OpenAI's Responses API."""
 
@@ -62,12 +70,20 @@ class OpenAIResponsesDraftingClient:
         instructions: str,
         input_text: str,
     ) -> DraftResponse:
-        response = await self._client.responses.create(
-            model=model,
-            instructions=instructions,
-            input=input_text,
-            text={"format": {"type": "json_object"}},
-        )
+        try:
+            response = await self._client.responses.create(
+                model=model,
+                instructions=instructions,
+                input=input_text,
+                text={"format": {"type": "json_object"}},
+            )
+        except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise DraftingRateLimitError(
+                    "OpenAI rate limit exceeded while drafting",
+                    retry_after_seconds=_retry_after_seconds(exc),
+                ) from exc
+            raise
         return _parse_model_json(response.output_text)
 
 
@@ -308,3 +324,19 @@ def _parse_model_json(raw_text: str) -> DraftResponse:
         reasoning=reasoning,
         should_reply=should_reply,
     )
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    return int(getattr(exc, "status_code", 0) or 0) == 429
+
+
+def _retry_after_seconds(exc: Exception) -> float:
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return 60.0
+    retry_after = headers.get("retry-after") or headers.get("Retry-After")
+    try:
+        return max(1.0, float(retry_after))
+    except (TypeError, ValueError):
+        return 60.0

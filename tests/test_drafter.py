@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from agent.drafter import Drafter, DraftResponse, _parse_model_json
+from agent.drafter import (
+    Drafter,
+    DraftingRateLimitError,
+    DraftResponse,
+    _parse_model_json,
+    _retry_after_seconds,
+)
 from agent.models import Message
 from agent.store import MessageStore, _parse_frontmatter
 
@@ -272,3 +278,20 @@ def test_parse_model_json_allows_no_reply_decision_without_text() -> None:
     assert parsed.should_reply is False
     assert parsed.proposed_text == ""
     assert parsed.reasoning == "Event already passed."
+
+
+def test_retry_after_seconds_reads_rate_limit_header() -> None:
+    class FakeResponse:
+        headers = {"retry-after": "12.5"}
+
+    class FakeRateLimit(Exception):
+        response = FakeResponse()
+        status_code = 429
+
+    assert _retry_after_seconds(FakeRateLimit()) == 12.5
+
+
+def test_drafting_rate_limit_error_carries_retry_delay() -> None:
+    exc = DraftingRateLimitError("limited", retry_after_seconds=30)
+
+    assert exc.retry_after_seconds == 30
