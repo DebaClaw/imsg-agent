@@ -240,7 +240,12 @@ def run_pending(args: argparse.Namespace) -> None:
     archive = IMessageArchive(Path(args.db or archive_db_path(config)))
     store = MessageStore(config.data_dir)
     try:
-        rows = pending_replies(archive, store, limit=args.limit)
+        rows = pending_replies(
+            archive,
+            store,
+            limit=args.limit,
+            max_missing_age_hours=config.max_inbox_age_hours,
+        )
         _print_rows(
             rows,
             [

@@ -74,7 +74,12 @@ def run_report(args: argparse.Namespace) -> None:
         payload: JSON = {
             "archive": archive.archive_stats(),
             "services": [service_status("monitor"), service_status("worker")],
-            "pending": pending_replies(archive, store, limit=args.limit),
+            "pending": pending_replies(
+                archive,
+                store,
+                limit=args.limit,
+                max_missing_age_hours=config.max_inbox_age_hours,
+            ),
             "unresolved_contacts": archive.unresolved_contact_chats(limit=args.issue_limit),
             "attachment_issues": archive.attachment_issues(limit=args.issue_limit),
         }
@@ -107,7 +112,12 @@ def run_report(args: argparse.Namespace) -> None:
 def run_pending(args: argparse.Namespace) -> None:
     config = load_config()
     with IMessageArchive(_db_path(args, config)) as archive:
-        rows = pending_replies(archive, MessageStore(_data_dir(args, config)), limit=args.limit)
+        rows = pending_replies(
+            archive,
+            MessageStore(_data_dir(args, config)),
+            limit=args.limit,
+            max_missing_age_hours=config.max_inbox_age_hours,
+        )
     if args.json_output:
         print(json.dumps(rows, indent=2, sort_keys=True))
         return

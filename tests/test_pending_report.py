@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from agent.archive_store import IMessageArchive
@@ -85,6 +85,48 @@ def test_pending_replies_marks_missing_draft(tmp_path: Path) -> None:
     assert len(rows) == 1
     assert rows[0]["draft_status"] == "missing"
     assert rows[0]["proposed_text"] == ""
+    archive.close()
+
+
+def test_pending_replies_excludes_stale_missing_drafts(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    old = _message()
+    old.date = NOW - timedelta(days=10)
+    archive.upsert_message(old)
+    store = MessageStore(tmp_path)
+
+    rows = pending_replies(
+        archive,
+        store,
+        limit=5,
+        max_missing_age_hours=48,
+        now=NOW,
+    )
+
+    assert rows == []
+    archive.close()
+
+
+def test_pending_replies_keeps_stale_existing_drafts(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    old = _message()
+    old.date = NOW - timedelta(days=10)
+    archive.upsert_message(old)
+    store = MessageStore(tmp_path)
+    store.write_draft(_draft())
+
+    rows = pending_replies(
+        archive,
+        store,
+        limit=5,
+        max_missing_age_hours=48,
+        now=NOW,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["draft_status"] == "draft_unapproved"
     archive.close()
 
 

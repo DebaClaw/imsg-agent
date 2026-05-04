@@ -134,9 +134,15 @@ TOOLS: list[JSON] = [
 
 
 class IMsgMCPServer:
-    def __init__(self, db_path: Path, data_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        data_dir: Path | None = None,
+        max_missing_age_hours: int | None = None,
+    ) -> None:
         self._db_path = db_path
         self._data_dir = data_dir or db_path.parent
+        self._max_missing_age_hours = max_missing_age_hours
 
     def handle(self, message: JSON) -> JSON | None:
         method = str(message.get("method") or "")
@@ -210,6 +216,7 @@ class IMsgMCPServer:
                         archive,
                         MessageStore(self._data_dir),
                         limit=_limit(arguments.get("limit"), 5),
+                        max_missing_age_hours=self._max_missing_age_hours,
                     )
                 )
             if name == "search_messages":
@@ -327,7 +334,7 @@ def cli() -> None:
     )
     config = load_config()
     db_path = Path(args.db or archive_db_path(config)).expanduser()
-    serve_stdio(IMsgMCPServer(db_path, config.data_dir))
+    serve_stdio(IMsgMCPServer(db_path, config.data_dir, config.max_inbox_age_hours))
 
 
 if __name__ == "__main__":

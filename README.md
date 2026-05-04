@@ -292,8 +292,9 @@ uv run imsg-agentctl logs worker --errors --lines 80
 
 `pending` joins the deterministic latest-inbound queue with matching draft/outbox/sent/error
 artifacts by `source_rowid`, so it answers "what needs a reply and what did the agent
-propose?" without approving or sending anything. AI no-reply decisions are recorded under
-`~/imsg-data/no_reply/` and are not shown as pending.
+propose?" without approving or sending anything. Missing draft items older than
+`max_inbox_age_hours` are filtered out because the worker will not draft them. AI no-reply
+decisions are recorded under `~/imsg-data/no_reply/` and are not shown as pending.
 
 Fetch attachment metadata and copy available attachment files for archived messages:
 
@@ -382,8 +383,10 @@ uv run imsg-archive attachment-issues --limit 50
 questions, Contacts matches, attachments, and group-chat status. It does not call AI.
 `pending` shows that same latest-inbound queue with any matching draft, outbox, sent, or
 error artifact for the triggering message's `source_rowid`; use `--json` to get full
-proposed reply text and draft paths. If the AI decides a time-sensitive message no longer
-needs a reply, it writes a `no_reply/` decision artifact and the item is filtered out.
+proposed reply text and draft paths. Unlike `attention`, `pending` filters out missing
+drafts that are older than `max_inbox_age_hours`, matching the worker's drafting policy.
+If the AI decides a time-sensitive message no longer needs a reply, it writes a
+`no_reply/` decision artifact and the item is filtered out.
 `search messages` uses SQLite FTS5 and can be narrowed with `--chat-id`, `--since`, and
 `--until`. Add `--json` to use output from other scripts.
 

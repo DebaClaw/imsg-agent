@@ -7,6 +7,7 @@ This module joins those two views without mutating either store.
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, SupportsInt
 
@@ -19,13 +20,21 @@ def pending_replies(
     store: MessageStore,
     *,
     limit: int = 5,
+    max_missing_age_hours: int | None = None,
+    now: datetime | None = None,
 ) -> list[ArchiveRow]:
     """Return latest-inbound chats decorated with matching draft artifacts."""
-    rows = archive.attention_items(limit=limit * 2)
+    rows = archive.attention_items(limit=max(limit * 10, 50))
     pending = []
     for row in rows:
         decorated = _decorate_pending_row(row, store)
         if decorated.get("draft_status") == "no_reply_needed":
+            continue
+        if _is_stale_missing(
+            decorated,
+            max_missing_age_hours=max_missing_age_hours,
+            now=now,
+        ):
             continue
         pending.append(decorated)
         if len(pending) >= limit:
@@ -120,3 +129,24 @@ def _int_or_none(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _is_stale_missing(
+    row: ArchiveRow,
+    *,
+    max_missing_age_hours: int | None,
+    now: datetime | None,
+) -> bool:
+    if max_missing_age_hours is None or max_missing_age_hours <= 0:
+        return False
+    if row.get("draft_status") != "missing":
+        return False
+    timestamp = row.get("last_message_at")
+    if not isinstance(timestamp, str):
+        return False
+    try:
+        message_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    current = (now or datetime.now(UTC)).astimezone(UTC)
+    return current - message_at.astimezone(UTC) > timedelta(hours=max_missing_age_hours)
