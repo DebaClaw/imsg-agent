@@ -7,7 +7,7 @@ import pytest
 
 from agent.archive_agent import ArchiveAgentWorker
 from agent.archive_store import IMessageArchive
-from agent.drafter import Drafter, DraftingRateLimitError, DraftResponse
+from agent.drafter import Drafter, DraftingQuotaError, DraftingRateLimitError, DraftResponse
 from agent.models import Chat, Message
 from agent.store import MessageStore
 
@@ -43,6 +43,17 @@ class RateLimitedDraftingClient:
         input_text: str,
     ) -> DraftResponse:
         raise DraftingRateLimitError("limited", retry_after_seconds=30)
+
+
+class QuotaLimitedDraftingClient:
+    async def create_draft(
+        self,
+        *,
+        model: str,
+        instructions: str,
+        input_text: str,
+    ) -> DraftResponse:
+        raise DraftingQuotaError("quota", retry_after_seconds=3600)
 
 
 def _chat(*, is_group: bool = False) -> Chat:
@@ -161,6 +172,37 @@ async def test_archive_agent_worker_leaves_cursor_on_rate_limit(tmp_path: Path) 
     )
 
     with pytest.raises(DraftingRateLimitError):
+        await worker.run_once()
+
+    assert archive.read_agent_cursor() == 0
+    assert not store.draft_exists_for_source(7, 100)
+    archive.close()
+
+
+@pytest.mark.asyncio
+async def test_archive_agent_worker_leaves_cursor_on_quota_error(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    archive.upsert_message(_message(rowid=100))
+    store = MessageStore(tmp_path / "data")
+    store.write_chat_context(
+        7,
+        {
+            "chat_id": 7,
+            "name": "Alex",
+            "identifier": "iMessage;-;+18015550101",
+            "professional": False,
+        },
+    )
+    drafter = Drafter(store, QuotaLimitedDraftingClient(), now=NOW)
+    worker = ArchiveAgentWorker(
+        archive=archive,
+        store=store,
+        drafter=drafter,
+        history_limit=20,
+    )
+
+    with pytest.raises(DraftingQuotaError):
         await worker.run_once()
 
     assert archive.read_agent_cursor() == 0

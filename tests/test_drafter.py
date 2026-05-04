@@ -7,8 +7,10 @@ import pytest
 
 from agent.drafter import (
     Drafter,
+    DraftingQuotaError,
     DraftingRateLimitError,
     DraftResponse,
+    _openai_error_code,
     _parse_model_json,
     _retry_after_seconds,
 )
@@ -295,3 +297,17 @@ def test_drafting_rate_limit_error_carries_retry_delay() -> None:
     exc = DraftingRateLimitError("limited", retry_after_seconds=30)
 
     assert exc.retry_after_seconds == 30
+
+
+def test_openai_error_code_reads_insufficient_quota_body() -> None:
+    class FakeQuotaError(Exception):
+        status_code = 429
+        body = {"error": {"code": "insufficient_quota"}}
+
+    assert _openai_error_code(FakeQuotaError()) == "insufficient_quota"
+
+
+def test_drafting_quota_error_defaults_to_long_retry_delay() -> None:
+    exc = DraftingQuotaError("quota")
+
+    assert exc.retry_after_seconds == 3600

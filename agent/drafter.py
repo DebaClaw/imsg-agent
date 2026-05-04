@@ -50,6 +50,14 @@ class DraftingRateLimitError(RuntimeError):
         self.retry_after_seconds = retry_after_seconds
 
 
+class DraftingQuotaError(RuntimeError):
+    """Raised when the model provider reports no usable quota for drafting."""
+
+    def __init__(self, message: str, *, retry_after_seconds: float = 3600.0) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 class OpenAIResponsesDraftingClient:
     """Small adapter around OpenAI's Responses API."""
 
@@ -79,6 +87,10 @@ class OpenAIResponsesDraftingClient:
             )
         except Exception as exc:
             if _is_rate_limit_error(exc):
+                if _openai_error_code(exc) == "insufficient_quota":
+                    raise DraftingQuotaError(
+                        "OpenAI quota exceeded while drafting; check project billing/quota",
+                    ) from exc
                 raise DraftingRateLimitError(
                     "OpenAI rate limit exceeded while drafting",
                     retry_after_seconds=_retry_after_seconds(exc),
@@ -328,6 +340,31 @@ def _parse_model_json(raw_text: str) -> DraftResponse:
 
 def _is_rate_limit_error(exc: Exception) -> bool:
     return int(getattr(exc, "status_code", 0) or 0) == 429
+
+
+def _openai_error_code(exc: Exception) -> str:
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        code = body.get("code")
+        if isinstance(code, str):
+            return code
+        error = body.get("error")
+        if isinstance(error, dict):
+            nested_code = error.get("code")
+            if isinstance(nested_code, str):
+                return nested_code
+    response = getattr(exc, "response", None)
+    try:
+        payload = response.json() if response is not None else None
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            code = error.get("code")
+            if isinstance(code, str):
+                return code
+    return ""
 
 
 def _retry_after_seconds(exc: Exception) -> float:
