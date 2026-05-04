@@ -13,8 +13,12 @@ NOW = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
 
 
 class FakeDraftingClient:
-    def __init__(self) -> None:
+    def __init__(self, response: DraftResponse | None = None) -> None:
         self.calls: list[dict[str, str]] = []
+        self.response = response or DraftResponse(
+            proposed_text="Yes, still on for Thursday.",
+            reasoning="They asked for a simple confirmation.",
+        )
 
     async def create_draft(
         self,
@@ -26,10 +30,7 @@ class FakeDraftingClient:
         self.calls.append(
             {"model": model, "instructions": instructions, "input_text": input_text}
         )
-        return DraftResponse(
-            proposed_text="Yes, still on for Thursday.",
-            reasoning="They asked for a simple confirmation.",
-        )
+        return self.response
 
 
 def _msg(
@@ -138,6 +139,36 @@ async def test_old_inbox_message_skips_api_call(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_model_can_decide_no_reply_needed_for_stale_logistics(tmp_path: Path) -> None:
+    store = MessageStore(tmp_path)
+    _seed_chat(store)
+    store.write_inbox(_msg(text="Reminder: appointment at 9am today"))
+    client = FakeDraftingClient(
+        DraftResponse(
+            proposed_text="",
+            reasoning=(
+                "The appointment time has already passed, so a confirmation now would be stale."
+            ),
+            should_reply=False,
+        )
+    )
+
+    draft = await Drafter(store, client, now=NOW).process_inbox(store.inbox_path(1, 7))
+
+    assert draft is None
+    assert len(client.calls) == 1
+    assert "CURRENT TIME" in client.calls[0]["input_text"]
+    assert store.draft_exists_for_source(7, 1)
+    no_reply = tmp_path / "no_reply"
+    files = list(no_reply.glob("*.md"))
+    assert len(files) == 1
+    meta, body = _parse_frontmatter(files[0].read_text())
+    assert meta["decision"] == "no_reply_needed"
+    assert meta["source_rowid"] == 1
+    assert "appointment time has already passed" in body
+
+
+@pytest.mark.asyncio
 async def test_auto_approval_requires_non_professional_chat(tmp_path: Path) -> None:
     store = MessageStore(tmp_path)
     _seed_chat(store, auto_approve=True, professional=False)
@@ -224,8 +255,20 @@ async def test_existing_draft_for_source_prevents_duplicate(tmp_path: Path) -> N
 
 def test_parse_model_json() -> None:
     parsed = _parse_model_json(
-        '{"proposed_text": "Sounds good", "reasoning": "Simple acknowledgement"}'
+        '{"should_reply": true, "proposed_text": "Sounds good", '
+        '"reasoning": "Simple acknowledgement"}'
     )
 
+    assert parsed.should_reply is True
     assert parsed.proposed_text == "Sounds good"
     assert parsed.reasoning == "Simple acknowledgement"
+
+
+def test_parse_model_json_allows_no_reply_decision_without_text() -> None:
+    parsed = _parse_model_json(
+        '{"should_reply": false, "proposed_text": "", "reasoning": "Event already passed."}'
+    )
+
+    assert parsed.should_reply is False
+    assert parsed.proposed_text == ""
+    assert parsed.reasoning == "Event already passed."

@@ -21,8 +21,16 @@ def pending_replies(
     limit: int = 5,
 ) -> list[ArchiveRow]:
     """Return latest-inbound chats decorated with matching draft artifacts."""
-    rows = archive.attention_items(limit=limit)
-    return [_decorate_pending_row(row, store) for row in rows]
+    rows = archive.attention_items(limit=limit * 2)
+    pending = []
+    for row in rows:
+        decorated = _decorate_pending_row(row, store)
+        if decorated.get("draft_status") == "no_reply_needed":
+            continue
+        pending.append(decorated)
+        if len(pending) >= limit:
+            break
+    return pending
 
 
 def _decorate_pending_row(row: ArchiveRow, store: MessageStore) -> ArchiveRow:
@@ -60,6 +68,7 @@ def _find_reply_artifact(
         ("outbox", store.data_dir / "outbox"),
         ("sent", store.data_dir / "sent"),
         ("error", store.data_dir / "errors"),
+        ("no_reply_needed", store.data_dir / "no_reply"),
     ]
     for status, root in candidates:
         if not root.exists():

@@ -14,9 +14,13 @@ Hard rules:
 - Match the relationship, tone, and freeform notes in the provided context.
 - Do not invent commitments, facts, availability, feelings, or plans that are not supported by
   the context or history.
+- Check whether replying still makes sense at CURRENT TIME. If the new message is only a
+  reminder, appointment confirmation, logistics note, or time-sensitive prompt for an event that
+  has already passed, set should_reply to false unless the history clearly calls for a follow-up.
 
 Return strict JSON only:
 {
+  "should_reply": true,
   "proposed_text": "the exact message Debbie could send",
   "reasoning": "short private explanation for Debbie"
 }

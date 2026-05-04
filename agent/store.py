@@ -328,12 +328,13 @@ class MessageStore:
             return None
 
     def draft_exists_for_source(self, chat_id: int, source_rowid: int) -> bool:
-        """Return True if any draft/outbox/archive already references source_rowid."""
+        """Return True if any draft/outbox/archive/decision already references source_rowid."""
         search_roots = [
             self._chat_dir(chat_id) / "drafts",
             self._root / "outbox",
             self._root / "sent",
             self._root / "errors",
+            self._root / "no_reply",
         ]
         for root in search_roots:
             if not root.exists():
@@ -351,6 +352,34 @@ class MessageStore:
                 ):
                     return True
         return False
+
+    def write_no_reply_decision(
+        self,
+        *,
+        uuid: str,
+        chat_id: int,
+        target_identifier: str,
+        source_rowid: int,
+        created_at: datetime,
+        reasoning: str,
+        model: str | None = None,
+    ) -> None:
+        """Record that the drafter decided no reply should be proposed."""
+        meta: dict[str, Any] = {
+            "uuid": uuid,
+            "chat_id": chat_id,
+            "target_identifier": target_identifier,
+            "source_rowid": source_rowid,
+            "created_at": _fmt_dt(created_at),
+            "reasoning": reasoning,
+            "decision": "no_reply_needed",
+        }
+        if model:
+            meta["model"] = model
+        _atomic_write(
+            self._root / "no_reply" / f"{uuid}.md",
+            _write_frontmatter(meta, reasoning),
+        )
 
     def move_draft_to_outbox(self, draft: Draft) -> None:
         """Move an approved draft from chats/{id}/drafts/ to outbox/."""

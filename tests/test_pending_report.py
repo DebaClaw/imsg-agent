@@ -104,3 +104,24 @@ def test_pending_replies_reports_outbox_artifact(tmp_path: Path) -> None:
     assert rows[0]["draft_uuid"] == "draft-1"
     assert rows[0]["proposed_text"] == "Yep, I can help with that."
     archive.close()
+
+
+def test_pending_replies_excludes_no_reply_decisions(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    archive.upsert_message(_message())
+    store = MessageStore(tmp_path)
+    store.write_no_reply_decision(
+        uuid="no-reply-1",
+        chat_id=7,
+        target_identifier="iMessage;-;+18015550101",
+        source_rowid=100,
+        created_at=NOW,
+        reasoning="The appointment already passed.",
+        model="gpt-5.5",
+    )
+
+    rows = pending_replies(archive, store, limit=5)
+
+    assert rows == []
+    archive.close()

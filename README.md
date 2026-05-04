@@ -25,9 +25,9 @@ database.
   no-AI attention ranking help answer what needs a reply now.
 - **No-GenAI archive mode**: archive backfill and monitoring do not import or call the
   drafting system or any model API.
-- **Human-readable data store**: inbox items, chat context, history, drafts, outbox,
-  sent archives, errors, nudges, and digests live under `~/imsg-data/` as Markdown with
-  YAML frontmatter.
+- **Human-readable data store**: inbox items, chat context, history, drafts, no-reply
+  decisions, outbox, sent archives, errors, nudges, and digests live under
+  `~/imsg-data/` as Markdown with YAML frontmatter.
 - **Per-chat context isolation**: drafting reads only `chats/{chat_id}/context.md` and
   `chats/{chat_id}/history.md` for the chat being handled.
 - **OpenAI drafting**: drafts are created through the OpenAI Responses API, with
@@ -292,7 +292,8 @@ uv run imsg-agentctl logs worker --errors --lines 80
 
 `pending` joins the deterministic latest-inbound queue with matching draft/outbox/sent/error
 artifacts by `source_rowid`, so it answers "what needs a reply and what did the agent
-propose?" without approving or sending anything.
+propose?" without approving or sending anything. AI no-reply decisions are recorded under
+`~/imsg-data/no_reply/` and are not shown as pending.
 
 Fetch attachment metadata and copy available attachment files for archived messages:
 
@@ -381,7 +382,8 @@ uv run imsg-archive attachment-issues --limit 50
 questions, Contacts matches, attachments, and group-chat status. It does not call AI.
 `pending` shows that same latest-inbound queue with any matching draft, outbox, sent, or
 error artifact for the triggering message's `source_rowid`; use `--json` to get full
-proposed reply text and draft paths.
+proposed reply text and draft paths. If the AI decides a time-sensitive message no longer
+needs a reply, it writes a `no_reply/` decision artifact and the item is filtered out.
 `search messages` uses SQLite FTS5 and can be narrowed with `--chat-id`, `--since`, and
 `--until`. Add `--json` to use output from other scripts.
 
@@ -435,9 +437,12 @@ sqlite3 ~/imsg-data/imessage.sqlite \
 1. `imsg-archive monitor` writes a new inbound message to SQLite.
 2. `imsg-agent-worker` sees it using the worker's `agent_draft_cursor`.
 3. The drafter reads only that chat's `context.md` plus SQLite history for that chat.
-4. A draft appears in `~/imsg-data/chats/{chat_id}/drafts/{uuid}.md`.
-5. The operator reviews or edits the draft.
-6. Setting `approved: true` moves the draft to `outbox/` on the next worker pass.
+4. If a reply is still relevant, a draft appears in
+   `~/imsg-data/chats/{chat_id}/drafts/{uuid}.md`.
+5. If a reply is no longer relevant, a no-reply decision appears in
+   `~/imsg-data/no_reply/{uuid}.md`.
+6. The operator reviews or edits drafts.
+7. Setting `approved: true` moves the draft to `outbox/` on the next worker pass.
 7. The sender archives the message to `sent/` before calling `imsg rpc send`.
 8. If the send fails, the archive is moved to `errors/` with the failure reason.
 

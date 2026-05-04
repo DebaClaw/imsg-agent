@@ -28,6 +28,7 @@ DEFAULT_MODEL = "gpt-5.5"
 class DraftResponse:
     proposed_text: str
     reasoning: str
+    should_reply: bool = True
 
 
 class DraftingClient(Protocol):
@@ -171,6 +172,25 @@ class Drafter:
                 source_rowid=message.rowid,
             ),
         )
+        if not response.should_reply:
+            self._store.write_no_reply_decision(
+                uuid=draft_uuid,
+                chat_id=message.chat_id,
+                target_identifier=str(
+                    context.get("identifier") or context.get("target_identifier") or ""
+                ),
+                source_rowid=message.rowid,
+                created_at=created_at,
+                reasoning=response.reasoning,
+                model=model,
+            )
+            logger.info(
+                "Recorded no-reply decision uuid=%s rowid=%d chat_id=%d",
+                draft_uuid,
+                message.rowid,
+                message.chat_id,
+            )
+            return None
 
         draft = Draft(
             uuid=draft_uuid,
@@ -231,12 +251,15 @@ class Drafter:
                 "CHAT CONTEXT FRONTMATTER\n"
                 + json.dumps(structured_context, ensure_ascii=False, sort_keys=True),
                 "CHAT CONTEXT NOTES\n" + (context_body.strip() or "(none)"),
+                "CURRENT TIME\n" + self._current_time().isoformat().replace("+00:00", "Z"),
                 "RECENT CHAT HISTORY\n" + (history.strip() or "(none)"),
                 f"NEW MESSAGE rowid={source_rowid}\n{new_message_text.strip()}",
                 (
-                    "Return strict JSON only with keys proposed_text and reasoning. "
-                    "proposed_text is the exact iMessage draft text. reasoning is a short "
-                    "private explanation for the operator."
+                    "Return strict JSON only with keys should_reply, proposed_text, and "
+                    "reasoning. should_reply is false when no reply is needed or when a "
+                    "reply would no longer be logical. proposed_text is the exact iMessage "
+                    "draft text when should_reply is true, or an empty string when false. "
+                    "reasoning is a short private explanation for the operator."
                 ),
             ]
         )
@@ -273,8 +296,15 @@ def _parse_model_json(raw_text: str) -> DraftResponse:
         data = json.loads(raw_text)
     except json.JSONDecodeError as exc:
         raise ValueError("Drafting model did not return valid JSON") from exc
+    should_reply = bool(data.get("should_reply", data.get("should_draft", True)))
     proposed_text = str(data.get("proposed_text") or "").strip()
     reasoning = str(data.get("reasoning") or "").strip()
-    if not proposed_text:
+    if should_reply and not proposed_text:
         raise ValueError("Drafting model returned empty proposed_text")
-    return DraftResponse(proposed_text=proposed_text, reasoning=reasoning)
+    if not reasoning:
+        reasoning = "Model determined no reply was needed." if not should_reply else ""
+    return DraftResponse(
+        proposed_text=proposed_text,
+        reasoning=reasoning,
+        should_reply=should_reply,
+    )

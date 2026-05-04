@@ -260,6 +260,24 @@ class TestDrafts:
         assert not (tmp_path / "chats" / "7" / "drafts" / "test-uuid-1234.md").exists()
         assert (tmp_path / "outbox" / "test-uuid-1234.md").exists()
 
+    def test_no_reply_decision_counts_as_existing_draft_source(self, tmp_path: Path) -> None:
+        store = MessageStore(tmp_path)
+        store.write_no_reply_decision(
+            uuid="no-reply-1",
+            chat_id=7,
+            target_identifier="iMessage;-;+14155550101",
+            source_rowid=123,
+            created_at=datetime(2026, 4, 4, 10, 31, 0, tzinfo=UTC),
+            reasoning="The appointment already passed.",
+            model="gpt-5.5",
+        )
+
+        path = tmp_path / "no_reply" / "no-reply-1.md"
+        meta, body = _parse_frontmatter(path.read_text())
+        assert meta["decision"] == "no_reply_needed"
+        assert body.strip() == "The appointment already passed."
+        assert store.draft_exists_for_source(7, 123)
+
 
 # ---------------------------------------------------------------------------
 # Outbox / Sent / Errors
