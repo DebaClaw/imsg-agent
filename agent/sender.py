@@ -66,7 +66,7 @@ class Sender:
                 await self._rpc.send(
                     text=item.text,
                     file=item.attachment_path,
-                    service=self._service,
+                    service=item.service or self._service,
                     chat_id=item.chat_id,
                 )
             except Exception as exc:

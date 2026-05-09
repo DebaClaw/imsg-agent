@@ -279,6 +279,7 @@ class MessageStore:
             "approved": draft.approved,
             "prompt_version": draft.prompt_version,
             "reasoning": draft.reasoning,
+            "service": draft.service,
         }
         if draft.source_rowid is not None:
             meta["source_rowid"] = draft.source_rowid
@@ -322,6 +323,7 @@ class MessageStore:
                 source_rowid=int(meta["source_rowid"]) if meta.get("source_rowid") else None,
                 model=meta.get("model") or None,
                 auto_approved=bool(meta.get("auto_approved")),
+                service=meta.get("service") or "auto",
             )
         except Exception as exc:
             logger.warning("Failed to parse draft %s: %s", path, exc)
@@ -393,6 +395,7 @@ class MessageStore:
             "source_draft_uuid": draft.uuid,
             "reasoning": draft.reasoning,
             "auto_approved": draft.auto_approved,
+            "service": draft.service,
         }
         if draft.source_rowid is not None:
             meta["source_rowid"] = draft.source_rowid
@@ -424,6 +427,7 @@ class MessageStore:
                 text=body.strip(),
                 attachment_path=meta.get("attachment_path") or None,
                 created_at=_parse_dt(meta.get("created_at")),
+                service=meta.get("service") or "auto",
                 source_draft_uuid=meta.get("source_draft_uuid") or None,
                 source_rowid=int(meta["source_rowid"]) if meta.get("source_rowid") else None,
                 reasoning=meta.get("reasoning") or "",
@@ -442,6 +446,7 @@ class MessageStore:
             "sent_at": _fmt_dt(sent_at or datetime.now(UTC)),
             "reasoning": item.reasoning,
             "source_draft_uuid": item.source_draft_uuid or item.uuid,
+            "service": item.service,
         }
         if item.source_rowid is not None:
             meta["source_rowid"] = item.source_rowid
@@ -462,6 +467,7 @@ class MessageStore:
             "error": reason,
             "failed_at": _fmt_dt(datetime.now(UTC)),
             "reasoning": item.reasoning,
+            "service": item.service,
         }
         if item.source_draft_uuid:
             meta["source_draft_uuid"] = item.source_draft_uuid

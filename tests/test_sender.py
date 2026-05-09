@@ -46,7 +46,7 @@ def _draft(approved: bool = True, *, auto_approved: bool = False) -> Draft:
     return Draft(
         uuid="20260425T120000Z-1",
         chat_id=7,
-        target_identifier="iMessage;-;+14155550101",
+        target_identifier="SMS;-;+14155550101",
         created_at=NOW,
         proposed_text="Yes, still on for Thursday.",
         reasoning="They asked for confirmation.",
@@ -55,6 +55,7 @@ def _draft(approved: bool = True, *, auto_approved: bool = False) -> Draft:
         source_rowid=1,
         model="gpt-5.5",
         auto_approved=auto_approved,
+        service="SMS",
     )
 
 
@@ -76,6 +77,7 @@ def test_approval_scanner_moves_approved_draft_to_outbox(tmp_path: Path) -> None
     assert meta["source_draft_uuid"] == "20260425T120000Z-1"
     assert meta["source_rowid"] == 1
     assert meta["reasoning"] == "They asked for confirmation."
+    assert meta["service"] == "SMS"
     assert body.strip() == "Yes, still on for Thursday."
 
 
@@ -103,7 +105,7 @@ async def test_sender_sends_and_archives_reasoning(tmp_path: Path) -> None:
         {
             "text": "Yes, still on for Thursday.",
             "file": None,
-            "service": "auto",
+            "service": "SMS",
             "chat_id": 7,
             "to": None,
             "chat_identifier": None,
@@ -114,6 +116,7 @@ async def test_sender_sends_and_archives_reasoning(tmp_path: Path) -> None:
     meta, body = _parse_frontmatter(sent_path.read_text())
     assert meta["source_draft_uuid"] == "20260425T120000Z-1"
     assert meta["reasoning"] == "They asked for confirmation."
+    assert meta["service"] == "SMS"
     assert body.strip() == "Yes, still on for Thursday."
     assert not list((tmp_path / "outbox").glob("*.md"))
 

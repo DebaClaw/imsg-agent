@@ -234,6 +234,7 @@ class Drafter:
             source_rowid=message.rowid,
             model=model,
             auto_approved=auto_approved,
+            service=message.service or str(context.get("service") or "auto"),
         )
         self._store.write_draft(draft)
         logger.info(

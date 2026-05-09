@@ -82,6 +82,7 @@ class Draft:
     source_rowid: int | None = None
     model: str | None = None
     auto_approved: bool = False
+    service: str = "auto"
 
 
 @dataclass
@@ -92,6 +93,7 @@ class OutboxItem:
     text: str
     attachment_path: str | None  # must be under ~/imsg-data/outbox/attachments/ only
     created_at: datetime
+    service: str = "auto"
     source_draft_uuid: str | None = None
     source_rowid: int | None = None
     reasoning: str = ""
