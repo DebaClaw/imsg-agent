@@ -65,9 +65,11 @@ agent/
   archive_agent.py AI worker that consumes the SQLite archive
   mcp_server.py    Read-only MCP server over the SQLite archive
   manage_cli.py    Operator CLI for managing and reporting on the system
+  web_app.py       Local web GUI/API for archive browsing and draft review
   main.py         Runtime event loop
 
 config/imsg.json  Default local configuration
+web/              Static assets for the local operator GUI
 scripts/setup.sh  Environment and data-directory setup
 scripts/install_launchd.sh  Install a user LaunchAgent for archive monitoring
 scripts/install_agent_worker_launchd.sh  Install archive-backed AI worker service
@@ -118,6 +120,7 @@ Restart your shell after `uv tool update-shell`, then verify:
 imsg-agentctl --help
 imsg-archive --help
 imsg-agent-worker --help
+imsg-agent-web --help
 imsg-mcp --help
 ```
 
@@ -311,6 +314,26 @@ an inbound non-reaction. For `--message-rowid`, it targets that exact archived m
 Manual drafting ignores `max_inbox_age_hours` by default so the AI can still decide whether
 an older time-sensitive message is logically stale and write a `no_reply/` decision. Add
 `--respect-age` to apply the normal background-worker age cutoff.
+
+## Local Web GUI
+
+Run the local operator interface on loopback:
+
+```bash
+uv run imsg-agent-web
+```
+
+Open `http://127.0.0.1:8787` to review the attention orbit, pending drafts, recent
+activity, search results, and archive issues. The GUI reads conversation visibility from
+`~/imsg-data/imessage.sqlite` and reads/writes draft approval artifacts under
+`~/imsg-data/chats/`. Approving in the GUI queues an `outbox/{uuid}.md` file; it does not
+call `imsg rpc send` directly.
+
+Optional overrides:
+
+```bash
+uv run imsg-agent-web --port 8790 --data-dir ~/imsg-data --db ~/imsg-data/imessage.sqlite
+```
 
 Fetch attachment metadata and copy available attachment files for archived messages:
 

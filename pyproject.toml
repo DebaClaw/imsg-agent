@@ -34,6 +34,7 @@ dev = []
 imsg-agent = "agent.main:cli"
 imsg-agent-worker = "agent.archive_agent:cli"
 imsg-agentctl = "agent.manage_cli:cli"
+imsg-agent-web = "agent.web_app:cli"
 imsg-archive = "agent.archive_main:cli"
 imsg-mcp = "agent.mcp_server:cli"
 

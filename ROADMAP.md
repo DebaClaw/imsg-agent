@@ -201,7 +201,7 @@ interfaces and AI workflows on top without making the archive depend on AI.
 #### Management Interfaces
 - ✅ `imsg-agentctl` — installed operator CLI for status, reports, services, logs, and queues
 - ⬜ TUI dashboard for communications awareness and triage
-- ⬜ Local web interface for archive browsing and communication management
+- 🔄 Local web interface for archive browsing and communication management
 - ✅ Shared read-only service/query layer for CLI, MCP, TUI, and web
 - ⬜ Saved views: unanswered, recently active, quiet relationships, attachment issues
 

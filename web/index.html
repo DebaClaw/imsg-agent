@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>imsg-agent Observatory</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="rail" aria-label="Views">
+        <div class="mark">
+          <span class="mark-dot"></span>
+          <span>imsg</span>
+        </div>
+        <button class="rail-button active" data-view="overview" type="button">Orbit</button>
+        <button class="rail-button" data-view="pending" type="button">Drafts</button>
+        <button class="rail-button" data-view="attention" type="button">Attention</button>
+        <button class="rail-button" data-view="search" type="button">Search</button>
+        <button class="rail-button" data-view="issues" type="button">Issues</button>
+      </aside>
+
+      <section class="mainstage">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">local relationship console</p>
+            <h1>The Relationship Observatory</h1>
+          </div>
+          <div class="status-strip" id="statusStrip" aria-live="polite"></div>
+        </header>
+
+        <section class="workbench" id="overviewView">
+          <div class="orbit-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">attention field</p>
+                <h2>Who is tugging on the thread?</h2>
+              </div>
+              <button class="ghost-button" id="refreshButton" type="button">Refresh</button>
+            </div>
+            <div class="orbit" id="orbit" aria-label="Attention orbit"></div>
+          </div>
+
+          <div class="queue-panel">
+            <div class="panel-heading tight">
+              <div>
+                <p class="eyebrow">review queue</p>
+                <h2>Pending drafts</h2>
+              </div>
+            </div>
+            <div class="queue-list" id="pendingList"></div>
+          </div>
+        </section>
+
+        <section class="workbench hidden" id="listView">
+          <div class="list-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow" id="listEyebrow">queue</p>
+                <h2 id="listTitle">Rows</h2>
+              </div>
+            </div>
+            <div class="table-list" id="tableList"></div>
+          </div>
+        </section>
+
+        <section class="workbench hidden" id="searchView">
+          <div class="list-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">archive search</p>
+                <h2>Find the thread again</h2>
+              </div>
+            </div>
+            <form class="search-form" id="searchForm">
+              <input id="searchInput" autocomplete="off" placeholder="coffee saturday" />
+              <button type="submit">Search</button>
+            </form>
+            <div class="table-list" id="searchResults"></div>
+          </div>
+        </section>
+      </section>
+
+      <aside class="detail" id="detailPane" aria-live="polite">
+        <div class="empty-state">
+          <p class="eyebrow">selected chat</p>
+          <h2>Pick a signal</h2>
+          <p>Open a conversation to review context, message history, and any proposed reply.</p>
+        </div>
+      </aside>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
