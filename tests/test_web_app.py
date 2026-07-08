@@ -207,3 +207,54 @@ def test_web_update_chat_context_persists_fields_and_notes(tmp_path: Path) -> No
     assert context["professional"] is False
     assert "ignored" not in context
     assert notes == "Met through the hiking group."
+
+
+def test_web_update_chat_context_seeds_archive_identity_without_existing_context(
+    tmp_path: Path,
+) -> None:
+    _seed_archive(tmp_path)
+
+    payload = _service(tmp_path).update_chat_context(
+        7,
+        fields={
+            "relationship": "friend",
+            "tone": "casual",
+            "professional": False,
+            "auto_approve": False,
+            "do_not_draft": False,
+        },
+        notes="",
+    )
+
+    context, notes = MessageStore(tmp_path).read_chat_context_document(7)
+    assert payload["status"] == "saved"
+    assert context["chat_id"] == 7
+    assert context["name"] == "Alex"
+    assert context["identifier"] == "iMessage;-;+18015550101"
+    assert context["service"] == "iMessage"
+    assert context["participants"] == ["+18015550101"]
+    assert context["relationship"] == "friend"
+    assert context["tone"] == "casual"
+    assert context["professional"] is False
+    assert context["auto_approve"] is False
+    assert context["do_not_draft"] is False
+    assert notes == ""
+
+
+def test_web_update_chat_context_preserves_notes_when_notes_omitted(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    MessageStore(tmp_path).write_chat_context(
+        7,
+        {
+            "chat_id": 7,
+            "relationship": "friend",
+            "notes": "Keep this note.",
+        },
+    )
+
+    _service(tmp_path).update_chat_context(7, fields={"tone": "warmer"})
+
+    context, notes = MessageStore(tmp_path).read_chat_context_document(7)
+    assert context["relationship"] == "friend"
+    assert context["tone"] == "warmer"
+    assert notes == "Keep this note."

@@ -167,6 +167,8 @@ class OperatorService:
     ) -> JSON:
         store = MessageStore(self.data_dir)
         current, current_notes = store.read_chat_context_document(chat_id)
+        with IMessageArchive(self.db_path) as archive:
+            seed = archive.chat_context_seed(chat_id)
         allowed = {
             "relationship",
             "tone",
@@ -180,6 +182,14 @@ class OperatorService:
             "participants",
         }
         updated = dict(current)
+        if seed:
+            updated.setdefault("name", seed.get("name") or f"chat {chat_id}")
+            updated.setdefault("identifier", seed.get("identifier") or "")
+            updated.setdefault("service", seed.get("service") or "")
+            updated.setdefault("participants", seed.get("participants") or [])
+            updated.setdefault("is_group", bool(seed.get("is_group")))
+            if seed.get("last_message_at"):
+                updated.setdefault("last_active", seed.get("last_message_at"))
         for key, value in fields.items():
             if key in allowed:
                 updated[key] = value
