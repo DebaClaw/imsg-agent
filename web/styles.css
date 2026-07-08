@@ -132,6 +132,34 @@ body[data-skin="pastel"] {
   --signal-4: #c9a6ff;
 }
 
+body[data-skin="country"] {
+  --paper: #f3ead8;
+  --ink: #2f2922;
+  --muted: #716755;
+  --line: #c7b38d;
+  --panel: #fff5df;
+  --panel-strong: #ead7af;
+  --coral: #c7432e;
+  --mint: #6f8d62;
+  --cobalt: #4c6f86;
+  --amber: #d99a31;
+  --violet: #7d5b43;
+  --shadow: 0 20px 54px rgba(71, 45, 22, 0.18);
+  --grid-a: rgba(74, 50, 28, 0.052);
+  --grid-b: rgba(53, 42, 31, 0.036);
+  --orbit-ring: rgba(78, 55, 34, 0.2);
+  --orbit-link: rgba(94, 74, 49, 0.28);
+  --orbit-link-hot: rgba(199, 67, 46, 0.52);
+  --signal-text: #221912;
+  --signal-shadow: 8px 10px 0 rgba(72, 45, 20, 0.16);
+  --core-glow: 0 0 42px rgba(217, 154, 49, 0.24);
+  --signal-0: #c7432e;
+  --signal-1: #6f8d62;
+  --signal-2: #4c6f86;
+  --signal-3: #e3b455;
+  --signal-4: #8c6548;
+}
+
 button,
 input,
 textarea {
@@ -351,7 +379,7 @@ h3 {
 .skin-switch {
   display: grid;
   flex: 0 0 auto;
-  grid-template-columns: repeat(4, 64px);
+  grid-template-columns: repeat(5, 58px);
   overflow: hidden;
   border: 1px solid var(--ink);
   border-radius: 8px;
@@ -923,11 +951,11 @@ button:disabled {
     grid-template-columns: repeat(2, 74px);
   }
 
-  .skin-switch button:nth-child(2) {
+  .skin-switch button:nth-child(2n) {
     border-right: 0;
   }
 
-  .skin-switch button:nth-child(-n + 2) {
+  .skin-switch button:nth-child(-n + 4) {
     border-bottom: 1px solid var(--ink);
   }
 

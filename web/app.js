@@ -7,7 +7,7 @@ const state = {
 };
 
 const signalColors = ["--signal-0", "--signal-1", "--signal-2", "--signal-3", "--signal-4"];
-const skins = ["light", "dark", "neon", "pastel"];
+const skins = ["light", "dark", "neon", "pastel", "country"];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
