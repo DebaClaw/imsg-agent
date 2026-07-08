@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, TypedDict, Unpack
 
 from agent.reviewer import DraftReviewer, ReviewPolicy, default_policy_path
 from agent.store import _parse_frontmatter, _write_frontmatter
@@ -11,27 +12,42 @@ NOW = datetime(2026, 7, 7, 6, 0, 0, tzinfo=UTC)
 CUTOFF = "2026-07-07T05:00:00+00:00"
 
 
-def make_policy(**overrides) -> ReviewPolicy:
-    base = dict(
-        enabled=True,
-        review_after=datetime.fromisoformat(CUTOFF),
-        max_draft_age_hours=24.0,
-        max_length=900,
-        max_approvals_per_chat_per_day=5,
-        max_approvals_per_day=20,
-        allow_urls=False,
-        profanity=["fuck", "shit", "asshole"],
-        reveal_terms_ci=["assistant", "chatbot", "language model", "automation", "drafted"],
-        reveal_terms_cs=["AI", "Rue"],
-        escalate_keywords=["hospital", "funeral", "lawyer", "loan"],
-        commitment_phrases=["i'll be there", "i promise", "i'll pay"],
-    )
+class ReviewPolicyKwargs(TypedDict, total=False):
+    enabled: bool
+    review_after: datetime | None
+    max_draft_age_hours: float
+    max_length: int
+    max_approvals_per_chat_per_day: int
+    max_approvals_per_day: int
+    allow_urls: bool
+    profanity: list[str]
+    reveal_terms_ci: list[str]
+    reveal_terms_cs: list[str]
+    escalate_keywords: list[str]
+    commitment_phrases: list[str]
+
+
+def make_policy(**overrides: Unpack[ReviewPolicyKwargs]) -> ReviewPolicy:
+    base: ReviewPolicyKwargs = {
+        "enabled": True,
+        "review_after": datetime.fromisoformat(CUTOFF),
+        "max_draft_age_hours": 24.0,
+        "max_length": 900,
+        "max_approvals_per_chat_per_day": 5,
+        "max_approvals_per_day": 20,
+        "allow_urls": False,
+        "profanity": ["fuck", "shit", "asshole"],
+        "reveal_terms_ci": ["assistant", "chatbot", "language model", "automation", "drafted"],
+        "reveal_terms_cs": ["AI", "Rue"],
+        "escalate_keywords": ["hospital", "funeral", "lawyer", "loan"],
+        "commitment_phrases": ["i'll be there", "i promise", "i'll pay"],
+    }
     base.update(overrides)
     return ReviewPolicy(**base)
 
 
-def write_context(data_dir: Path, chat_id: int, **fields) -> None:
-    meta = {
+def write_context(data_dir: Path, chat_id: int, **fields: Any) -> None:
+    meta: dict[str, Any] = {
         "chat_id": chat_id,
         "identifier": "+12065550100",
         "participants": ["+12065550100"],
@@ -56,9 +72,9 @@ def write_draft(
     uuid: str = "20260707T053000Z-1000",
     created_at: str = "2026-07-07T05:30:00Z",
     approved: bool = False,
-    extra_meta: dict | None = None,
+    extra_meta: dict[str, Any] | None = None,
 ) -> Path:
-    meta = {
+    meta: dict[str, Any] = {
         "uuid": uuid,
         "chat_id": chat_id,
         "target_identifier": "+12065550100",
@@ -78,12 +94,16 @@ def write_draft(
     return path
 
 
-def run_reviewer(data_dir: Path, policy: ReviewPolicy | None = None, **kwargs) -> dict[str, int]:
+def run_reviewer(
+    data_dir: Path,
+    policy: ReviewPolicy | None = None,
+    **kwargs: Any,
+) -> dict[str, int]:
     reviewer = DraftReviewer(data_dir, policy or make_policy(), now=NOW, **kwargs)
     return reviewer.run_pass()
 
 
-def read_meta(path: Path) -> dict:
+def read_meta(path: Path) -> dict[str, Any]:
     meta, _ = _parse_frontmatter(path.read_text(encoding="utf-8"))
     return meta
 

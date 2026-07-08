@@ -524,6 +524,17 @@ class IMessageArchive:
                 m.chat_id AS chat_id,
                 c.name AS chat_name,
                 m.sender AS sender,
+                (
+                    SELECT contacts.full_name
+                    FROM chat_contact_matches matches
+                    JOIN contacts ON contacts.contact_id = matches.contact_id
+                    WHERE matches.chat_id = m.chat_id
+                        AND matches.source_identifier = m.sender
+                        AND matches.status = 'matched'
+                        AND contacts.full_name != ''
+                    ORDER BY matches.confidence DESC, contacts.full_name
+                    LIMIT 1
+                ) AS sender_name,
                 m.date AS message_at,
                 m.is_from_me AS is_from_me,
                 m.text AS text,
@@ -676,6 +687,17 @@ class IMessageArchive:
                 m.chat_id AS chat_id,
                 c.name AS chat_name,
                 m.sender AS sender,
+                (
+                    SELECT contacts.full_name
+                    FROM chat_contact_matches matches
+                    JOIN contacts ON contacts.contact_id = matches.contact_id
+                    WHERE matches.chat_id = m.chat_id
+                        AND matches.source_identifier = m.sender
+                        AND matches.status = 'matched'
+                        AND contacts.full_name != ''
+                    ORDER BY matches.confidence DESC, contacts.full_name
+                    LIMIT 1
+                ) AS sender_name,
                 m.date AS message_at,
                 m.is_from_me AS is_from_me,
                 m.text AS text,

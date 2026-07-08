@@ -3,9 +3,11 @@ const state = {
   activeView: "overview",
   selectedRow: null,
   selectedChat: null,
+  orbit: null,
 };
 
-const colors = ["#e85d4f", "#2ca58d", "#305fbd", "#d18b21", "#7254a3"];
+const signalColors = ["--signal-0", "--signal-1", "--signal-2", "--signal-3", "--signal-4"];
+const skins = ["light", "dark", "neon", "pastel"];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -23,6 +25,12 @@ function el(tag, className, textValue) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (textValue !== undefined) node.textContent = textValue;
+  return node;
+}
+
+function svgEl(tag, attrs = {}) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, String(value)));
   return node;
 }
 
@@ -84,6 +92,7 @@ async function runAction(button, action) {
 
 function setActiveView(view) {
   state.activeView = view;
+  if (view !== "overview") stopOrbit();
   document.querySelectorAll(".rail-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === view);
   });
@@ -116,31 +125,238 @@ function renderStatus(status) {
 }
 
 function renderOrbit(rows) {
+  stopOrbit();
   const orbit = document.getElementById("orbit");
   orbit.replaceChildren();
-  orbit.append(el("div", "core", "reply gravity"));
+  const svg = svgEl("svg", { class: "orbit-links", "aria-hidden": "true" });
+  const core = el("button", "core");
+  core.type = "button";
+  core.append(el("strong", "", "Me"));
+  core.append(el("span", "", "operator"));
+  orbit.append(svg, core);
   if (!rows.length) {
     orbit.append(el("p", "empty-state", "No inbound signals need attention."));
     return;
   }
-  rows.slice(0, 14).forEach((row, index) => {
-    const angle = (index / rows.length) * Math.PI * 2 - Math.PI / 2;
+
+  const rect = orbit.getBoundingClientRect();
+  const width = Math.max(orbit.clientWidth, rect.width, 640);
+  const height = Math.max(orbit.clientHeight, rect.height, 460);
+  const center = { x: width / 2, y: height / 2 };
+  const visibleRows = rows.slice(0, 16);
+  const maxSizeForField = Math.max(
+    76,
+    Math.min(144, Math.min(width, height) / (visibleRows.length > 7 ? 4.7 : 3.9)),
+  );
+  const nodes = visibleRows.map((row, index) => {
+    const angle = (index / visibleRows.length) * Math.PI * 2 - Math.PI / 2;
     const ring = index % 3;
-    const radius = 30 + ring * 11;
-    const x = 50 + Math.cos(angle) * radius;
-    const y = 50 + Math.sin(angle) * radius;
+    const homeRadius = Math.min(width, height) * (0.26 + ring * 0.07);
     const score = Number(row.score || 35);
+    const size = Math.max(72, Math.min(maxSizeForField, 62 + score * 0.9));
+    const line = svgEl("line", { class: "orbit-link" });
     const node = el("button", "signal");
     node.type = "button";
-    node.style.left = `${x}%`;
-    node.style.top = `${y}%`;
-    node.style.setProperty("--size", `${Math.max(82, Math.min(144, 78 + score))}px`);
-    node.style.setProperty("--signal-color", colors[index % colors.length]);
+    node.style.setProperty("--size", `${size}px`);
+    node.style.setProperty("--signal-color", `var(${signalColors[index % signalColors.length]})`);
     node.append(el("strong", "", nameOf(row)));
     node.append(el("span", "", `${text(row.hours_waiting, "?")}h`));
-    node.addEventListener("click", () => openChat(row));
+    svg.append(line);
     orbit.append(node);
+    const body = {
+      row,
+      element: node,
+      line,
+      x: center.x + Math.cos(angle) * homeRadius,
+      y: center.y + Math.sin(angle) * homeRadius,
+      vx: Math.sin(index + 1) * 1.2,
+      vy: -Math.cos(index + 1) * 1.2,
+      radius: size / 2,
+      angle,
+      homeRadius,
+      drag: null,
+    };
+    wireSignalDrag(orbit, body);
+    return body;
   });
+
+  state.orbit = {
+    container: orbit,
+    svg,
+    core,
+    center,
+    nodes,
+    width,
+    height,
+    lastTime: 0,
+    animationId: 0,
+  };
+  state.orbit.animationId = requestAnimationFrame(stepOrbit);
+}
+
+function stopOrbit() {
+  if (state.orbit && state.orbit.animationId) {
+    cancelAnimationFrame(state.orbit.animationId);
+  }
+  state.orbit = null;
+}
+
+function wireSignalDrag(container, body) {
+  const move = (event) => {
+    if (!body.drag || body.drag.pointerId !== event.pointerId) return;
+    const point = orbitPoint(container, event);
+    const dx = point.x - body.drag.startX;
+    const dy = point.y - body.drag.startY;
+    body.drag.moved ||= Math.hypot(dx, dy) > 5;
+    body.vx = (point.x - body.x) * 0.55;
+    body.vy = (point.y - body.y) * 0.55;
+    body.x = point.x;
+    body.y = point.y;
+    event.preventDefault();
+  };
+
+  const finish = (event) => {
+    if (!body.drag || body.drag.pointerId !== event.pointerId) return;
+    const moved = body.drag.moved;
+    body.drag = null;
+    body.element.classList.remove("dragging");
+    try {
+      body.element.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture may already be released by the browser.
+    }
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", finish);
+    window.removeEventListener("pointercancel", finish);
+    if (!moved) openChat(body.row);
+  };
+
+  body.element.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const point = orbitPoint(container, event);
+    body.drag = {
+      pointerId: event.pointerId,
+      startX: point.x,
+      startY: point.y,
+      moved: false,
+    };
+    body.element.setPointerCapture(event.pointerId);
+    body.element.classList.add("dragging");
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    event.preventDefault();
+  });
+}
+
+function orbitPoint(container, event) {
+  const rect = container.getBoundingClientRect();
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+  };
+}
+
+function stepOrbit(timestamp) {
+  const orbit = state.orbit;
+  if (!orbit) return;
+  const rect = orbit.container.getBoundingClientRect();
+  orbit.width = Math.max(orbit.container.clientWidth, rect.width, 320);
+  orbit.height = Math.max(orbit.container.clientHeight, rect.height, 320);
+  orbit.center.x = orbit.width / 2;
+  orbit.center.y = orbit.height / 2;
+  const dt = Math.min(2, orbit.lastTime ? (timestamp - orbit.lastTime) / 16.67 : 1);
+  orbit.lastTime = timestamp;
+
+  orbit.nodes.forEach((node, index) => {
+    if (node.drag) return;
+    const drift = Math.sin(timestamp / 1400 + index) * 0.16;
+    const targetRadius = Math.min(orbit.width, orbit.height) * (0.24 + (index % 3) * 0.075);
+    node.homeRadius += (targetRadius - node.homeRadius) * 0.02;
+    const targetX = orbit.center.x + Math.cos(node.angle + drift) * node.homeRadius;
+    const targetY = orbit.center.y + Math.sin(node.angle + drift) * node.homeRadius;
+    node.vx += (targetX - node.x) * 0.012 * dt;
+    node.vy += (targetY - node.y) * 0.012 * dt;
+
+    const coreClearance = Math.max(80, Math.min(104, Math.min(orbit.width, orbit.height) * 0.17))
+      + node.radius * 0.6;
+    const fromCenterX = node.x - orbit.center.x;
+    const fromCenterY = node.y - orbit.center.y;
+    const fromCenterDistance = Math.max(1, Math.hypot(fromCenterX, fromCenterY));
+    if (fromCenterDistance < coreClearance) {
+      const force = (coreClearance - fromCenterDistance) * 0.018 * dt;
+      node.vx += (fromCenterX / fromCenterDistance) * force;
+      node.vy += (fromCenterY / fromCenterDistance) * force;
+    }
+  });
+
+  for (let i = 0; i < orbit.nodes.length; i += 1) {
+    for (let j = i + 1; j < orbit.nodes.length; j += 1) {
+      separateSignals(orbit.nodes[i], orbit.nodes[j], dt);
+    }
+  }
+
+  orbit.nodes.forEach((node) => {
+    if (!node.drag) {
+      node.vx *= 0.91;
+      node.vy *= 0.91;
+      node.x += node.vx * dt;
+      node.y += node.vy * dt;
+      bounceInBounds(node, orbit.width, orbit.height);
+    }
+    paintSignal(node, orbit.center);
+  });
+  orbit.animationId = requestAnimationFrame(stepOrbit);
+}
+
+function separateSignals(a, b, dt) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const distance = Math.max(1, Math.hypot(dx, dy));
+  const target = a.radius + b.radius + 16;
+  if (distance >= target) return;
+  const push = (target - distance) * 0.025 * dt;
+  const nx = dx / distance;
+  const ny = dy / distance;
+  if (!a.drag) {
+    a.vx -= nx * push;
+    a.vy -= ny * push;
+  }
+  if (!b.drag) {
+    b.vx += nx * push;
+    b.vy += ny * push;
+  }
+}
+
+function bounceInBounds(node, width, height) {
+  const padding = 18;
+  const minX = node.radius + padding;
+  const maxX = width - node.radius - padding;
+  const minY = node.radius + padding;
+  const maxY = height - node.radius - padding;
+  if (node.x < minX) {
+    node.x = minX;
+    node.vx = Math.abs(node.vx) * 0.72;
+  } else if (node.x > maxX) {
+    node.x = maxX;
+    node.vx = -Math.abs(node.vx) * 0.72;
+  }
+  if (node.y < minY) {
+    node.y = minY;
+    node.vy = Math.abs(node.vy) * 0.72;
+  } else if (node.y > maxY) {
+    node.y = maxY;
+    node.vy = -Math.abs(node.vy) * 0.72;
+  }
+}
+
+function paintSignal(node, center) {
+  node.element.style.left = `${node.x}px`;
+  node.element.style.top = `${node.y}px`;
+  node.line.setAttribute("x1", center.x);
+  node.line.setAttribute("y1", center.y);
+  node.line.setAttribute("x2", node.x);
+  node.line.setAttribute("y2", node.y);
 }
 
 function rowButton(row, extra = {}) {
@@ -280,13 +496,35 @@ function renderChat(payload, row) {
 
   const timeline = el("div", "timeline");
   (payload.messages || []).forEach((message) => {
-    const bubble = el("div", `message ${message.is_from_me ? "mine" : ""}`);
+    const rowNode = el("div", `message-row ${message.is_from_me ? "mine" : "theirs"}`);
+    rowNode.append(el("div", "sender-label", senderLabel(message, payload, row)));
+    const bubble = el("div", "message-bubble");
     bubble.append(el("div", "", text(message.text, "(no text)")));
     bubble.append(el("span", "time", when(message.message_at)));
-    timeline.append(bubble);
+    rowNode.append(bubble);
+    timeline.append(rowNode);
   });
   wrap.append(timeline);
   pane.append(wrap);
+}
+
+function senderLabel(message, payload, row) {
+  if (message.is_from_me) return "Me";
+  return (
+    text(message.sender_name) ||
+    text(message.sender) ||
+    singleContactName(message.contacts) ||
+    singleContactName(payload.chat && payload.chat.contacts) ||
+    text(message.chat_name) ||
+    nameOf(row)
+  );
+}
+
+function singleContactName(value) {
+  const clean = text(value);
+  if (!clean) return "";
+  const names = clean.split(",").map((name) => name.trim()).filter(Boolean);
+  return names.length === 1 ? names[0] : "";
 }
 
 function renderContextBox(payload, row) {
@@ -516,6 +754,23 @@ async function loadLogs(service, errors) {
   panel.append(pre);
 }
 
+function setSkin(skin) {
+  const selected = skins.includes(skin) ? skin : "light";
+  document.body.dataset.skin = selected;
+  document.body.classList.remove("active");
+  localStorage.setItem("imsg-agent-skin", selected);
+  document.querySelectorAll(".skin-switch [data-skin]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.skin === selected);
+  });
+}
+
+function initSkinControls() {
+  setSkin(localStorage.getItem("imsg-agent-skin") || "light");
+  document.querySelectorAll(".skin-switch [data-skin]").forEach((button) => {
+    button.addEventListener("click", () => setSkin(button.dataset.skin));
+  });
+}
+
 document.getElementById("refreshButton").addEventListener("click", (event) => {
   runAction(event.currentTarget, loadOverview);
 });
@@ -535,4 +790,5 @@ document.querySelectorAll(".rail-button").forEach((button) => {
   }));
 });
 
+initSkinControls();
 loadOverview().catch((error) => showError(error.message));

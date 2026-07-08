@@ -28,6 +28,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, TypeAlias, cast
 
 from dotenv import load_dotenv
 
@@ -45,6 +46,10 @@ APPROVE = "approve"
 _URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
 _MONEY_RE = re.compile(r"[$€£]\s?\d|\b\d+\s?(dollars|bucks|USD)\b", re.IGNORECASE)
 _UUID_TS_RE = re.compile(r"^(\d{8}T\d{6}Z)")
+
+Meta: TypeAlias = dict[str, Any]
+ReviewCounts: TypeAlias = dict[str, int]
+ReviewState: TypeAlias = dict[str, Any]
 
 
 @dataclass
@@ -137,7 +142,7 @@ def _alert_keywords(raw: object) -> list[str]:
     return []
 
 
-def _meta_chat_id(meta: dict) -> int | None:
+def _meta_chat_id(meta: Meta) -> int | None:
     try:
         return int(meta["chat_id"])
     except (KeyError, TypeError, ValueError):
@@ -166,12 +171,13 @@ class DraftReviewer:
     # State (daily rate-limit counters)
     # ------------------------------------------------------------------
 
-    def _load_state(self) -> dict:
+    def _load_state(self) -> ReviewState:
         today = self._now.strftime("%Y-%m-%d")
         try:
-            state = json.loads(self._state_path.read_text(encoding="utf-8"))
+            loaded = json.loads(self._state_path.read_text(encoding="utf-8"))
         except Exception:
-            state = {}
+            loaded = {}
+        state = cast(ReviewState, loaded) if isinstance(loaded, dict) else {}
         if state.get("day") != today:
             state = {"day": today, "total": 0, "per_chat": {}}
         state.setdefault("total", 0)
@@ -201,7 +207,7 @@ class DraftReviewer:
     # Gates
     # ------------------------------------------------------------------
 
-    def evaluate(self, meta: dict, body: str, context: dict) -> ReviewDecision:
+    def evaluate(self, meta: Meta, body: str, context: Meta) -> ReviewDecision:
         """Run every gate; the worst outcome wins (escalate > hold > approve)."""
         gates: list[GateResult] = []
 
@@ -339,7 +345,7 @@ class DraftReviewer:
     # Scan & writeback
     # ------------------------------------------------------------------
 
-    def run_pass(self) -> dict[str, int]:
+    def run_pass(self) -> ReviewCounts:
         """Review every eligible pending draft once. Returns outcome counts."""
         counts = {"approved": 0, "held": 0, "escalated": 0, "skipped": 0}
         if not self._policy.enabled or self._policy.review_after is None:
@@ -410,7 +416,7 @@ class DraftReviewer:
     def _write_decision(
         self,
         path: Path,
-        meta: dict,
+        meta: Meta,
         body: str,
         status: str,
         decision: ReviewDecision,
@@ -432,7 +438,7 @@ class DraftReviewer:
         tmp.write_text(_write_frontmatter(meta, body), encoding="utf-8")
         os.replace(tmp, path)
 
-    def _append_escalation(self, meta: dict, decision: ReviewDecision) -> None:
+    def _append_escalation(self, meta: Meta, decision: ReviewDecision) -> None:
         if self._dry_run:
             return
         self._escalations_path.parent.mkdir(parents=True, exist_ok=True)
@@ -444,7 +450,7 @@ class DraftReviewer:
             fh.write(line)
 
 
-def _parse_created_at(meta: dict) -> datetime | None:
+def _parse_created_at(meta: Meta) -> datetime | None:
     raw = meta.get("created_at")
     if not raw:
         return None

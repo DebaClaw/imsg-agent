@@ -283,6 +283,30 @@ def test_archive_reports_stats_and_needs_reply(tmp_path: Path) -> None:
     archive.close()
 
 
+def test_chat_messages_include_sender_contact_name(tmp_path: Path) -> None:
+    archive = IMessageArchive(tmp_path / "imessage.sqlite")
+    archive.upsert_chat(_chat())
+    archive.upsert_message(_message())
+    archive.replace_contacts(
+        contacts_from_json(
+            [
+                {
+                    "id": "contact-1",
+                    "fullName": "Alex Appleseed",
+                    "phones": [{"value": "+14155550101"}],
+                }
+            ]
+        )
+    )
+    archive.enrich_chat_contacts()
+
+    rows = archive.chat_messages(7)
+
+    assert rows[0]["sender"] == "+14155550101"
+    assert rows[0]["sender_name"] == "Alex Appleseed"
+    archive.close()
+
+
 def test_archive_searches_messages_with_fts(tmp_path: Path) -> None:
     archive = IMessageArchive(tmp_path / "imessage.sqlite")
     archive.upsert_chat(_chat())
