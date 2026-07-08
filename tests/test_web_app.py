@@ -157,3 +157,53 @@ def test_web_request_draft_requires_api_key(tmp_path: Path) -> None:
 
     with pytest.raises(WebAPIError, match="OPENAI_API_KEY"):
         _service(tmp_path).request_draft(message_rowid=100)
+
+
+def test_web_reject_draft_records_no_reply_decision(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    store = MessageStore(tmp_path)
+    store.write_draft(_draft())
+
+    payload = _service(tmp_path).reject_draft("draft-1", reasoning="Already handled.")
+
+    rows = _service(tmp_path).pending(limit=5)
+    assert payload["status"] == "rejected"
+    assert rows == []
+    assert not (tmp_path / "chats" / "7" / "drafts" / "draft-1.md").exists()
+    assert list((tmp_path / "no_reply").glob("*.md"))
+
+
+def test_web_mark_no_reply_hides_missing_pending_item(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+
+    payload = _service(tmp_path).mark_no_reply(
+        chat_id=7,
+        source_rowid=100,
+        reasoning="No response needed.",
+    )
+
+    assert payload["status"] == "no_reply_recorded"
+    assert _service(tmp_path).pending(limit=5) == []
+
+
+def test_web_update_chat_context_persists_fields_and_notes(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+
+    payload = _service(tmp_path).update_chat_context(
+        7,
+        fields={
+            "relationship": "close friend",
+            "tone": "warm",
+            "professional": False,
+            "ignored": "nope",
+        },
+        notes="Met through the hiking group.",
+    )
+
+    context, notes = MessageStore(tmp_path).read_chat_context_document(7)
+    assert payload["status"] == "saved"
+    assert context["relationship"] == "close friend"
+    assert context["tone"] == "warm"
+    assert context["professional"] is False
+    assert "ignored" not in context
+    assert notes == "Met through the hiking group."

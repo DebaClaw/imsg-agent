@@ -335,6 +335,23 @@ Optional overrides:
 uv run imsg-agent-web --port 8790 --data-dir ~/imsg-data --db ~/imsg-data/imessage.sqlite
 ```
 
+For day-to-day background control of the GUI:
+
+```bash
+scripts/imsg-agent start
+scripts/imsg-agent status
+scripts/imsg-agent restart
+scripts/imsg-agent stop
+```
+
+The script starts `uv run imsg-agent-web` in the background, writes logs under
+`~/imsg-data/logs/`, and stores its PID at `~/imsg-data/run/imsg-agent-web.pid`.
+It accepts the same common overrides, for example:
+
+```bash
+scripts/imsg-agent start --port 8790 --data-dir ~/imsg-data --db ~/imsg-data/imessage.sqlite
+```
+
 Fetch attachment metadata and copy available attachment files for archived messages:
 
 ```bash

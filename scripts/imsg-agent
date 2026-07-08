@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+DATA_DIR="${IMSG_DATA_DIR:-$HOME/imsg-data}"
+RUN_DIR="${RUN_DIR:-$DATA_DIR/run}"
+LOG_DIR="${LOG_DIR:-$DATA_DIR/logs}"
+PID_FILE="${PID_FILE:-$RUN_DIR/imsg-agent-web.pid}"
+STDOUT_LOG="${STDOUT_LOG:-$LOG_DIR/imsg-agent-web.log}"
+STDERR_LOG="${STDERR_LOG:-$LOG_DIR/imsg-agent-web.err.log}"
+HOST="${HOST:-127.0.0.1}"
+PORT="${PORT:-8787}"
+DB_PATH="${DB_PATH:-$DATA_DIR/imessage.sqlite}"
+STATIC_DIR="${STATIC_DIR:-$REPO_DIR/web}"
+UV_BIN="${UV_BIN:-}"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/imsg-agent {start|stop|restart|status} [options]
+
+Controls the local imsg-agent web GUI:
+  uv run imsg-agent-web
+
+Options:
+  --host HOST          Bind host. Default: 127.0.0.1
+  --port PORT          Bind port. Default: 8787
+  --data-dir DIR       imsg data dir. Default: ~/imsg-data
+  --db PATH            SQLite archive path. Default: DATA_DIR/imessage.sqlite
+  --static-dir DIR     Static asset dir. Default: repo web/
+
+Environment overrides:
+  REPO_DIR=/path/to/imsg-agent
+  IMSG_DATA_DIR=~/imsg-data
+  RUN_DIR=~/imsg-data/run
+  LOG_DIR=~/imsg-data/logs
+  PID_FILE=~/imsg-data/run/imsg-agent-web.pid
+  UV_BIN=/opt/homebrew/bin/uv
+
+Open:
+  http://127.0.0.1:8787
+EOF
+}
+
+action="${1:-}"
+if [[ -z "$action" ]]; then
+  usage >&2
+  exit 2
+fi
+shift || true
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host)
+      HOST="${2:?--host requires a value}"
+      shift 2
+      ;;
+    --port)
+      PORT="${2:?--port requires a value}"
+      shift 2
+      ;;
+    --data-dir)
+      DATA_DIR="${2:?--data-dir requires a value}"
+      RUN_DIR="$DATA_DIR/run"
+      LOG_DIR="$DATA_DIR/logs"
+      PID_FILE="$RUN_DIR/imsg-agent-web.pid"
+      STDOUT_LOG="$LOG_DIR/imsg-agent-web.log"
+      STDERR_LOG="$LOG_DIR/imsg-agent-web.err.log"
+      DB_PATH="$DATA_DIR/imessage.sqlite"
+      shift 2
+      ;;
+    --db)
+      DB_PATH="${2:?--db requires a value}"
+      shift 2
+      ;;
+    --static-dir)
+      STATIC_DIR="${2:?--static-dir requires a value}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+url() {
+  printf 'http://%s:%s' "$HOST" "$PORT"
+}
+
+find_uv() {
+  if [[ -n "$UV_BIN" ]]; then
+    return
+  fi
+  UV_BIN="$(command -v uv || true)"
+  if [[ -z "$UV_BIN" ]]; then
+    echo "uv not found in PATH. Set UV_BIN=/path/to/uv and retry." >&2
+    exit 1
+  fi
+}
+
+pid_value() {
+  if [[ -f "$PID_FILE" ]]; then
+    cat "$PID_FILE"
+  fi
+}
+
+is_running() {
+  local pid
+  pid="$(pid_value || true)"
+  [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1
+}
+
+status() {
+  echo "url: $(url)"
+  echo "pid_file: $PID_FILE"
+  echo "stdout_log: $STDOUT_LOG"
+  echo "stderr_log: $STDERR_LOG"
+  if is_running; then
+    echo "status: running"
+    echo "pid: $(pid_value)"
+    if command -v curl >/dev/null 2>&1; then
+      if curl -fsS "$(url)/api/status" >/dev/null 2>&1; then
+        echo "health: ok"
+      else
+        echo "health: not responding"
+      fi
+    fi
+  else
+    echo "status: stopped"
+    if [[ -f "$PID_FILE" ]]; then
+      echo "stale_pid: $(pid_value)"
+    fi
+  fi
+}
+
+start() {
+  if is_running; then
+    echo "imsg-agent web GUI is already running."
+    status
+    return
+  fi
+
+  find_uv
+  mkdir -p "$RUN_DIR" "$LOG_DIR"
+  rm -f "$PID_FILE"
+
+  (
+    cd "$REPO_DIR"
+    nohup "$UV_BIN" run imsg-agent-web \
+      --host "$HOST" \
+      --port "$PORT" \
+      --data-dir "$DATA_DIR" \
+      --db "$DB_PATH" \
+      --static-dir "$STATIC_DIR" \
+      >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    echo $! >"$PID_FILE"
+  )
+
+  local pid
+  pid="$(pid_value)"
+  echo "started imsg-agent web GUI pid=$pid"
+  echo "open $(url)"
+
+  if command -v curl >/dev/null 2>&1; then
+    for _ in {1..25}; do
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        echo "process exited during startup; see $STDERR_LOG" >&2
+        exit 1
+      fi
+      if curl -fsS "$(url)/api/status" >/dev/null 2>&1; then
+        echo "health: ok"
+        return
+      fi
+      sleep 0.2
+    done
+    echo "started, but health check did not respond yet; see $STDOUT_LOG and $STDERR_LOG"
+  fi
+}
+
+stop() {
+  if ! is_running; then
+    echo "imsg-agent web GUI is not running."
+    rm -f "$PID_FILE"
+    return
+  fi
+
+  local pid
+  pid="$(pid_value)"
+  kill "$pid"
+  for _ in {1..40}; do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      rm -f "$PID_FILE"
+      echo "stopped imsg-agent web GUI"
+      return
+    fi
+    sleep 0.1
+  done
+
+  kill -9 "$pid" >/dev/null 2>&1 || true
+  rm -f "$PID_FILE"
+  echo "stopped imsg-agent web GUI with SIGKILL"
+}
+
+case "$action" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart)
+    stop
+    start
+    ;;
+  status)
+    status
+    ;;
+  -h|--help)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $action" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
