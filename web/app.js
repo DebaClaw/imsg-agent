@@ -129,11 +129,13 @@ function renderOrbit(rows) {
   const orbit = document.getElementById("orbit");
   orbit.replaceChildren();
   const svg = svgEl("svg", { class: "orbit-links", "aria-hidden": "true" });
+  const zap = el("div", "zap-burst", "ZAP!");
+  zap.setAttribute("aria-hidden", "true");
   const core = el("button", "core");
   core.type = "button";
   core.append(el("strong", "", "Me"));
   core.append(el("span", "", "operator"));
-  orbit.append(svg, core);
+  orbit.append(svg, core, zap);
   if (!rows.length) {
     orbit.append(el("p", "empty-state", "No inbound signals need attention."));
     return;
@@ -175,6 +177,7 @@ function renderOrbit(rows) {
       angle,
       homeRadius,
       drag: null,
+      focus: null,
     };
     wireSignalDrag(orbit, body);
     return body;
@@ -184,12 +187,14 @@ function renderOrbit(rows) {
     container: orbit,
     svg,
     core,
+    zap,
     center,
     nodes,
     width,
     height,
     lastTime: 0,
     animationId: 0,
+    focusTimeout: 0,
   };
   state.orbit.animationId = requestAnimationFrame(stepOrbit);
 }
@@ -197,6 +202,9 @@ function renderOrbit(rows) {
 function stopOrbit() {
   if (state.orbit && state.orbit.animationId) {
     cancelAnimationFrame(state.orbit.animationId);
+  }
+  if (state.orbit && state.orbit.focusTimeout) {
+    window.clearTimeout(state.orbit.focusTimeout);
   }
   state.orbit = null;
 }
@@ -228,7 +236,7 @@ function wireSignalDrag(container, body) {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", finish);
     window.removeEventListener("pointercancel", finish);
-    if (!moved) openChat(body.row);
+    if (!moved) focusSignal(body);
   };
 
   body.element.addEventListener("pointerdown", (event) => {
@@ -247,6 +255,39 @@ function wireSignalDrag(container, body) {
     window.addEventListener("pointercancel", finish);
     event.preventDefault();
   });
+}
+
+function focusSignal(body) {
+  const orbit = state.orbit;
+  if (!orbit || orbit.focusTimeout) return;
+  orbit.container.classList.add("is-focusing");
+  orbit.zap.classList.remove("active");
+  orbit.zap.style.left = `${body.x}px`;
+  orbit.zap.style.top = `${body.y}px`;
+  body.element.classList.add("focused");
+  body.line.classList.add("focused");
+  const startX = body.x;
+  const startY = body.y;
+  body.focus = {
+    startTime: 0,
+    duration: 360,
+    startX,
+    startY,
+  };
+  body.vx = 0;
+  body.vy = 0;
+  window.requestAnimationFrame(() => orbit.zap.classList.add("active"));
+  orbit.focusTimeout = window.setTimeout(() => {
+    openChat(body.row).catch((error) => showError(error.message));
+    window.setTimeout(() => {
+      body.focus = null;
+      body.element.classList.remove("focused");
+      body.line.classList.remove("focused");
+      orbit.container.classList.remove("is-focusing");
+      orbit.zap.classList.remove("active");
+      orbit.focusTimeout = 0;
+    }, 280);
+  }, 240);
 }
 
 function orbitPoint(container, event) {
@@ -270,6 +311,16 @@ function stepOrbit(timestamp) {
 
   orbit.nodes.forEach((node, index) => {
     if (node.drag) return;
+    if (node.focus) {
+      if (!node.focus.startTime) node.focus.startTime = timestamp;
+      const progress = Math.min(1, (timestamp - node.focus.startTime) / node.focus.duration);
+      const eased = easeOutExpo(progress);
+      node.x = node.focus.startX + (orbit.center.x - node.focus.startX) * eased;
+      node.y = node.focus.startY + (orbit.center.y - node.focus.startY) * eased;
+      node.vx = 0;
+      node.vy = 0;
+      return;
+    }
     const drift = Math.sin(timestamp / 1400 + index) * 0.16;
     const targetRadius = Math.min(orbit.width, orbit.height) * (0.24 + (index % 3) * 0.075);
     node.homeRadius += (targetRadius - node.homeRadius) * 0.02;
@@ -353,10 +404,15 @@ function bounceInBounds(node, width, height) {
 function paintSignal(node, center) {
   node.element.style.left = `${node.x}px`;
   node.element.style.top = `${node.y}px`;
+  node.element.style.setProperty("--signal-scale", node.focus ? "1.72" : "1");
   node.line.setAttribute("x1", center.x);
   node.line.setAttribute("y1", center.y);
   node.line.setAttribute("x2", node.x);
   node.line.setAttribute("y2", node.y);
+}
+
+function easeOutExpo(value) {
+  return value >= 1 ? 1 : 1 - 2 ** (-10 * value);
 }
 
 function rowButton(row, extra = {}) {
@@ -475,6 +531,9 @@ async function openChat(row) {
 function renderChat(payload, row) {
   const pane = document.getElementById("detailPane");
   pane.replaceChildren();
+  pane.classList.remove("tray-zap");
+  void pane.offsetHeight;
+  pane.classList.add("tray-zap");
   const wrap = el("div", "chat-detail");
   const head = el("div", "chat-head");
   head.append(el("p", "eyebrow", `chat ${text(row.chat_id)}`));

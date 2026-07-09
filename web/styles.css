@@ -442,6 +442,11 @@ h3 {
   transition: stroke 180ms ease;
 }
 
+.orbit-link.focused {
+  stroke: var(--orbit-link-hot);
+  stroke-width: 4;
+}
+
 .core {
   position: absolute;
   z-index: 3;
@@ -488,7 +493,7 @@ h3 {
   min-height: 78px;
   place-items: center;
   padding: 10px;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) scale(var(--signal-scale, 1));
   border: 2px solid var(--ink);
   border-radius: 50%;
   background: var(--signal-color);
@@ -498,11 +503,17 @@ h3 {
   touch-action: none;
   user-select: none;
   text-align: center;
+  transition:
+    filter 120ms ease,
+    opacity 120ms ease,
+    outline-color 120ms ease,
+    transform 120ms ease;
 }
 
 .signal:hover,
-.signal.dragging {
-  z-index: 4;
+.signal.dragging,
+.signal.focused {
+  z-index: 5;
 }
 
 .signal:hover {
@@ -513,6 +524,42 @@ h3 {
 .signal.dragging {
   cursor: grabbing;
   filter: saturate(1.15);
+}
+
+.signal.focused {
+  cursor: default;
+  filter: saturate(1.4) brightness(1.08);
+  animation: signal-zap 320ms cubic-bezier(0.19, 1, 0.22, 1);
+}
+
+.orbit.is-focusing .signal:not(.focused) {
+  opacity: 0.24;
+  filter: blur(1px) saturate(0.75);
+  transform: translate(-50%, -50%) scale(0.82);
+}
+
+.zap-burst {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  top: 50%;
+  padding: 8px 12px;
+  transform: translate(-50%, -50%) scale(0.4) rotate(-8deg);
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  box-shadow: var(--signal-shadow);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: 0;
+  opacity: 0;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+
+.zap-burst.active {
+  animation: zap-burst 360ms cubic-bezier(0.14, 1.4, 0.36, 1) forwards;
 }
 
 .signal strong {
@@ -584,6 +631,10 @@ h3 {
   border-left: 1px solid var(--line);
   background: #181713;
   color: var(--paper);
+}
+
+.detail.tray-zap .chat-detail {
+  animation: tray-zap-in 260ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .empty-state,
@@ -876,6 +927,65 @@ button:disabled {
 
 .hidden {
   display: none;
+}
+
+@keyframes signal-zap {
+  0% {
+    filter: saturate(1.9) brightness(1.25);
+    transform: translate(-50%, -50%) scale(0.92);
+  }
+
+  62% {
+    filter: saturate(1.55) brightness(1.14);
+    transform: translate(-50%, -50%) scale(calc(var(--signal-scale, 1) * 1.08));
+  }
+
+  100% {
+    filter: saturate(1.4) brightness(1.08);
+    transform: translate(-50%, -50%) scale(var(--signal-scale, 1));
+  }
+}
+
+@keyframes zap-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.35) rotate(-10deg);
+  }
+
+  38% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.28) rotate(5deg);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.85) rotate(10deg);
+  }
+}
+
+@keyframes tray-zap-in {
+  0% {
+    opacity: 0.35;
+    transform: translateX(18px) scale(0.985);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signal,
+  .orbit-link {
+    transition-duration: 1ms;
+  }
+
+  .signal.focused,
+  .zap-burst.active,
+  .detail.tray-zap .chat-detail {
+    animation: none;
+  }
 }
 
 @media (max-width: 1100px) {
