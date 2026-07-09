@@ -195,6 +195,7 @@ function renderOrbit(rows) {
     lastTime: 0,
     animationId: 0,
     focusTimeout: 0,
+    releaseTimeout: 0,
   };
   state.orbit.animationId = requestAnimationFrame(stepOrbit);
 }
@@ -205,6 +206,9 @@ function stopOrbit() {
   }
   if (state.orbit && state.orbit.focusTimeout) {
     window.clearTimeout(state.orbit.focusTimeout);
+  }
+  if (state.orbit && state.orbit.releaseTimeout) {
+    window.clearTimeout(state.orbit.releaseTimeout);
   }
   state.orbit = null;
 }
@@ -269,10 +273,12 @@ function focusSignal(body) {
   const startX = body.x;
   const startY = body.y;
   body.focus = {
+    phase: "in",
     startTime: 0,
-    duration: 360,
+    duration: 340,
     startX,
     startY,
+    progress: 0,
   };
   body.vx = 0;
   body.vy = 0;
@@ -280,14 +286,51 @@ function focusSignal(body) {
   orbit.focusTimeout = window.setTimeout(() => {
     openChat(body.row).catch((error) => showError(error.message));
     window.setTimeout(() => {
-      body.focus = null;
-      body.element.classList.remove("focused");
-      body.line.classList.remove("focused");
-      orbit.container.classList.remove("is-focusing");
-      orbit.zap.classList.remove("active");
-      orbit.focusTimeout = 0;
-    }, 280);
-  }, 240);
+      releaseSignal(body, orbit);
+    }, 760);
+  }, 320);
+}
+
+function releaseSignal(body, orbit) {
+  if (state.orbit !== orbit || !body.focus) return;
+  const target = signalHomePoint(body, orbit);
+  body.focus = {
+    phase: "out",
+    startTime: 0,
+    duration: 520,
+    startX: body.x,
+    startY: body.y,
+    endX: target.x,
+    endY: target.y,
+    progress: 0,
+  };
+  body.vx = 0;
+  body.vy = 0;
+  orbit.releaseTimeout = window.setTimeout(() => {
+    if (state.orbit !== orbit) return;
+    body.x = target.x;
+    body.y = target.y;
+    body.vx = 0;
+    body.vy = 0;
+    body.focus = null;
+    body.element.classList.remove("focused");
+    body.line.classList.remove("focused");
+    orbit.container.classList.remove("is-focusing");
+    orbit.zap.classList.remove("active");
+    orbit.focusTimeout = 0;
+    orbit.releaseTimeout = 0;
+  }, 540);
+}
+
+function signalHomePoint(node, orbit) {
+  const targetRadius = Math.min(orbit.width, orbit.height) * (0.24 + (orbit.nodes.indexOf(node) % 3) * 0.075);
+  const x = orbit.center.x + Math.cos(node.angle) * targetRadius;
+  const y = orbit.center.y + Math.sin(node.angle) * targetRadius;
+  const padding = node.radius + 18;
+  return {
+    x: Math.max(padding, Math.min(orbit.width - padding, x)),
+    y: Math.max(padding, Math.min(orbit.height - padding, y)),
+  };
 }
 
 function orbitPoint(container, event) {
@@ -315,8 +358,11 @@ function stepOrbit(timestamp) {
       if (!node.focus.startTime) node.focus.startTime = timestamp;
       const progress = Math.min(1, (timestamp - node.focus.startTime) / node.focus.duration);
       const eased = easeOutExpo(progress);
-      node.x = node.focus.startX + (orbit.center.x - node.focus.startX) * eased;
-      node.y = node.focus.startY + (orbit.center.y - node.focus.startY) * eased;
+      node.focus.progress = progress;
+      const targetX = node.focus.phase === "out" ? node.focus.endX : orbit.center.x;
+      const targetY = node.focus.phase === "out" ? node.focus.endY : orbit.center.y;
+      node.x = node.focus.startX + (targetX - node.focus.startX) * eased;
+      node.y = node.focus.startY + (targetY - node.focus.startY) * eased;
       node.vx = 0;
       node.vy = 0;
       return;
@@ -404,7 +450,10 @@ function bounceInBounds(node, width, height) {
 function paintSignal(node, center) {
   node.element.style.left = `${node.x}px`;
   node.element.style.top = `${node.y}px`;
-  node.element.style.setProperty("--signal-scale", node.focus ? "1.72" : "1");
+  const focusScale = node.focus && node.focus.phase === "out"
+    ? 1 + 0.72 * (1 - node.focus.progress)
+    : 1.72;
+  node.element.style.setProperty("--signal-scale", node.focus ? String(focusScale) : "1");
   node.line.setAttribute("x1", center.x);
   node.line.setAttribute("y1", center.y);
   node.line.setAttribute("x2", node.x);
