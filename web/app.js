@@ -195,8 +195,9 @@ function renderOrbit(rows) {
     lastTime: 0,
     animationId: 0,
     focusTimeout: 0,
-    releaseTimeout: 0,
+    activeFocus: null,
   };
+  orbit.addEventListener("pointerdown", handleOrbitBackgroundPointerDown);
   state.orbit.animationId = requestAnimationFrame(stepOrbit);
 }
 
@@ -207,10 +208,15 @@ function stopOrbit() {
   if (state.orbit && state.orbit.focusTimeout) {
     window.clearTimeout(state.orbit.focusTimeout);
   }
-  if (state.orbit && state.orbit.releaseTimeout) {
-    window.clearTimeout(state.orbit.releaseTimeout);
-  }
   state.orbit = null;
+}
+
+function handleOrbitBackgroundPointerDown(event) {
+  const orbit = state.orbit;
+  const target = event.target;
+  if (!orbit || !(target instanceof Element)) return;
+  if (target.closest(".signal, .core")) return;
+  releaseFocusedSignal(orbit);
 }
 
 function wireSignalDrag(container, body) {
@@ -263,7 +269,15 @@ function wireSignalDrag(container, body) {
 
 function focusSignal(body) {
   const orbit = state.orbit;
-  if (!orbit || orbit.focusTimeout) return;
+  if (!orbit) return;
+  if (orbit.activeFocus && orbit.activeFocus !== body) {
+    sendSignalHome(orbit.activeFocus, orbit);
+  }
+  if (orbit.focusTimeout) {
+    window.clearTimeout(orbit.focusTimeout);
+    orbit.focusTimeout = 0;
+  }
+  orbit.activeFocus = body;
   orbit.container.classList.add("is-focusing");
   orbit.zap.classList.remove("active");
   orbit.zap.style.left = `${body.x}px`;
@@ -286,12 +300,32 @@ function focusSignal(body) {
   orbit.focusTimeout = window.setTimeout(() => {
     openChat(body.row).catch((error) => showError(error.message));
     window.setTimeout(() => {
-      releaseSignal(body, orbit);
-    }, 760);
+      if (state.orbit !== orbit || orbit.activeFocus !== body || !body.focus) return;
+      body.focus.phase = "hold";
+      body.focus.startTime = 0;
+      body.focus.progress = 1;
+      body.x = orbit.center.x;
+      body.y = orbit.center.y;
+      body.vx = 0;
+      body.vy = 0;
+      orbit.focusTimeout = 0;
+    }, 180);
   }, 320);
 }
 
-function releaseSignal(body, orbit) {
+function releaseFocusedSignal(orbit) {
+  if (!orbit.activeFocus) return;
+  sendSignalHome(orbit.activeFocus, orbit);
+  orbit.activeFocus = null;
+  orbit.container.classList.remove("is-focusing");
+  orbit.zap.classList.remove("active");
+  if (orbit.focusTimeout) {
+    window.clearTimeout(orbit.focusTimeout);
+    orbit.focusTimeout = 0;
+  }
+}
+
+function sendSignalHome(body, orbit) {
   if (state.orbit !== orbit || !body.focus) return;
   const target = signalHomePoint(body, orbit);
   body.focus = {
@@ -306,20 +340,6 @@ function releaseSignal(body, orbit) {
   };
   body.vx = 0;
   body.vy = 0;
-  orbit.releaseTimeout = window.setTimeout(() => {
-    if (state.orbit !== orbit) return;
-    body.x = target.x;
-    body.y = target.y;
-    body.vx = 0;
-    body.vy = 0;
-    body.focus = null;
-    body.element.classList.remove("focused");
-    body.line.classList.remove("focused");
-    orbit.container.classList.remove("is-focusing");
-    orbit.zap.classList.remove("active");
-    orbit.focusTimeout = 0;
-    orbit.releaseTimeout = 0;
-  }, 540);
 }
 
 function signalHomePoint(node, orbit) {
@@ -356,7 +376,9 @@ function stepOrbit(timestamp) {
     if (node.drag) return;
     if (node.focus) {
       if (!node.focus.startTime) node.focus.startTime = timestamp;
-      const progress = Math.min(1, (timestamp - node.focus.startTime) / node.focus.duration);
+      const progress = node.focus.phase === "hold"
+        ? 1
+        : Math.min(1, (timestamp - node.focus.startTime) / node.focus.duration);
       const eased = easeOutExpo(progress);
       node.focus.progress = progress;
       const targetX = node.focus.phase === "out" ? node.focus.endX : orbit.center.x;
@@ -365,6 +387,11 @@ function stepOrbit(timestamp) {
       node.y = node.focus.startY + (targetY - node.focus.startY) * eased;
       node.vx = 0;
       node.vy = 0;
+      if (node.focus.phase === "out" && progress >= 1) {
+        node.focus = null;
+        node.element.classList.remove("focused");
+        node.line.classList.remove("focused");
+      }
       return;
     }
     const drift = Math.sin(timestamp / 1400 + index) * 0.16;
