@@ -12,6 +12,7 @@ HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8787}"
 DB_PATH="${DB_PATH:-$DATA_DIR/imessage.sqlite}"
 STATIC_DIR="${STATIC_DIR:-$REPO_DIR/web}"
+PYTHON_BIN="${PYTHON_BIN:-$REPO_DIR/.venv/bin/python}"
 UV_BIN="${UV_BIN:-}"
 
 usage() {
@@ -19,7 +20,7 @@ usage() {
 Usage: scripts/imsg-agent {start|stop|restart|status} [options]
 
 Controls the local imsg-agent web GUI:
-  uv run imsg-agent-web
+  python -m agent.web_app
 
 Options:
   --host HOST          Bind host. Default: 127.0.0.1
@@ -34,6 +35,7 @@ Environment overrides:
   RUN_DIR=~/imsg-data/run
   LOG_DIR=~/imsg-data/logs
   PID_FILE=~/imsg-data/run/imsg-agent-web.pid
+  PYTHON_BIN=/path/to/python
   UV_BIN=/opt/homebrew/bin/uv
 
 Open:
@@ -103,6 +105,15 @@ find_uv() {
   fi
 }
 
+server_command() {
+  if [[ -x "$PYTHON_BIN" ]]; then
+    printf '%s\n' "$PYTHON_BIN"
+    return
+  fi
+  find_uv
+  printf '%s\n' "$UV_BIN"
+}
+
 pid_value() {
   if [[ -f "$PID_FILE" ]]; then
     cat "$PID_FILE"
@@ -145,19 +156,30 @@ start() {
     return
   fi
 
-  find_uv
+  local runtime
+  runtime="$(server_command)"
   mkdir -p "$RUN_DIR" "$LOG_DIR"
   rm -f "$PID_FILE"
 
   (
     cd "$REPO_DIR"
-    nohup "$UV_BIN" run imsg-agent-web \
-      --host "$HOST" \
-      --port "$PORT" \
-      --data-dir "$DATA_DIR" \
-      --db "$DB_PATH" \
-      --static-dir "$STATIC_DIR" \
-      >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    if [[ "$runtime" == "$PYTHON_BIN" ]]; then
+      nohup "$runtime" -m agent.web_app \
+        --host "$HOST" \
+        --port "$PORT" \
+        --data-dir "$DATA_DIR" \
+        --db "$DB_PATH" \
+        --static-dir "$STATIC_DIR" \
+        >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    else
+      nohup "$runtime" run imsg-agent-web \
+        --host "$HOST" \
+        --port "$PORT" \
+        --data-dir "$DATA_DIR" \
+        --db "$DB_PATH" \
+        --static-dir "$STATIC_DIR" \
+        >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    fi
     echo $! >"$PID_FILE"
   )
 
