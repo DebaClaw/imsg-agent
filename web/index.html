@@ -64,6 +64,13 @@
             </div>
             <div class="queue-list" id="pendingList"></div>
           </div>
+          <aside class="detail" id="detailPane" aria-live="polite">
+            <div class="empty-state">
+              <p class="eyebrow">selected chat</p>
+              <h2>Pick a signal</h2>
+              <p>Open a conversation to review context, message history, and any proposed reply.</p>
+            </div>
+          </aside>
         </section>
 
         <section class="workbench hidden" id="listView">
@@ -109,13 +116,6 @@
         </section>
       </section>
 
-      <aside class="detail" id="detailPane" aria-live="polite">
-        <div class="empty-state">
-          <p class="eyebrow">selected chat</p>
-          <h2>Pick a signal</h2>
-          <p>Open a conversation to review context, message history, and any proposed reply.</p>
-        </div>
-      </aside>
     </main>
 
     <script src="/app.js" defer></script>

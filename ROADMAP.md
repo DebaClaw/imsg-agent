@@ -217,6 +217,8 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ✅ **Orbit conversation mode**
   - ✅ Switch from the default Orbit plus draft queue to a selected-conversation workbench
   - ✅ Restore the default operator-and-queue mode only when selection is released
+  - ✅ Keep the Orbit visible while the conversation replaces only the draft-queue column
+  - ✅ Load a smaller initial transcript and avoid repeated per-message contact lookups
 - ✅ **Non-destructive draft lifecycle**
   - ✅ Archive drafts with an operator reason instead of deleting Markdown artifacts
   - ✅ Hide archived drafts by default while preserving an explicit archive view

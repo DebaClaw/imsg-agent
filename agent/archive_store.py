@@ -682,45 +682,43 @@ class IMessageArchive:
         params.append(limit)
         rows = self._db.execute(
             f"""
+            WITH matched_contacts AS (
+                SELECT matches.source_identifier, contacts.full_name
+                FROM chat_contact_matches matches
+                JOIN contacts ON contacts.contact_id = matches.contact_id
+                WHERE matches.chat_id = ?
+                    AND matches.status = 'matched'
+                    AND contacts.full_name != ''
+            ),
+            sender_contacts AS (
+                SELECT source_identifier, MIN(full_name) AS sender_name
+                FROM matched_contacts
+                GROUP BY source_identifier
+            ),
+            chat_contacts AS (
+                SELECT GROUP_CONCAT(DISTINCT full_name) AS contacts
+                FROM matched_contacts
+            )
             SELECT
                 m.rowid AS message_rowid,
                 m.chat_id AS chat_id,
                 c.name AS chat_name,
                 m.sender AS sender,
-                (
-                    SELECT contacts.full_name
-                    FROM chat_contact_matches matches
-                    JOIN contacts ON contacts.contact_id = matches.contact_id
-                    WHERE matches.chat_id = m.chat_id
-                        AND matches.source_identifier = m.sender
-                        AND matches.status = 'matched'
-                        AND contacts.full_name != ''
-                    ORDER BY matches.confidence DESC, contacts.full_name
-                    LIMIT 1
-                ) AS sender_name,
+                sender_contacts.sender_name AS sender_name,
                 m.date AS message_at,
                 m.is_from_me AS is_from_me,
                 m.text AS text,
                 m.has_attachments AS has_attachments,
-                (
-                    SELECT GROUP_CONCAT(full_name, ', ')
-                    FROM (
-                        SELECT DISTINCT contacts.full_name AS full_name
-                        FROM chat_contact_matches matches
-                        JOIN contacts ON contacts.contact_id = matches.contact_id
-                        WHERE matches.chat_id = m.chat_id
-                            AND matches.status = 'matched'
-                            AND contacts.full_name != ''
-                        ORDER BY contacts.full_name
-                    )
-                ) AS contacts
+                chat_contacts.contacts AS contacts
             FROM messages m
             JOIN chats c ON c.id = m.chat_id
+            LEFT JOIN sender_contacts ON sender_contacts.source_identifier = m.sender
+            CROSS JOIN chat_contacts
             WHERE {" AND ".join(where)}
             ORDER BY m.date DESC, m.rowid DESC
             LIMIT ?
             """,
-            params,
+            [chat_id, *params],
         ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 

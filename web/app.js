@@ -627,10 +627,25 @@ async function openChat(row) {
   state.selectedRow = row;
   const chatId = row.chat_id;
   if (!chatId) return;
-  const payload = await api(`/api/chats/${chatId}/messages?limit=90`);
-  state.selectedChat = payload;
   document.body.classList.add("chat-selected");
-  renderChat(payload, row);
+  renderChatLoading(row);
+  try {
+    const payload = await api(`/api/chats/${chatId}/messages?limit=40`);
+    state.selectedChat = payload;
+    renderChat(payload, row);
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+function renderChatLoading(row) {
+  const pane = document.getElementById("detailPane");
+  pane.replaceChildren();
+  const box = el("div", "empty-state");
+  box.append(el("p", "eyebrow", "opening conversation"));
+  box.append(el("h2", "", nameOf(row)));
+  box.append(el("p", "", "Loading the recent thread and relationship context."));
+  pane.append(box);
 }
 
 function closeWorkbench() {
