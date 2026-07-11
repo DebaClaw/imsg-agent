@@ -14,6 +14,10 @@ Directory layout:
     {root}/outbox/{uuid}.md
     {root}/sent/{uuid}.md
     {root}/errors/{uuid}.md
+    {root}/draft_archive/{uuid}.md
+    {root}/contact_reviews/{chat_id}.md
+    {root}/operator.md
+    {root}/observatory.md
 """
 from __future__ import annotations
 
@@ -109,6 +113,48 @@ class MessageStore:
     def write_cursor(self, rowid: int) -> None:
         """Atomically persist the cursor rowid."""
         _atomic_write(self._root / "state.json", json.dumps({"cursor": rowid}))
+
+    # ------------------------------------------------------------------
+    # Operator profile / Observatory preferences
+    # ------------------------------------------------------------------
+
+    def read_operator_profile(self) -> dict[str, Any]:
+        """Read the local operator identity without contacting Contacts."""
+        defaults: dict[str, Any] = {
+            "display_name": "Me",
+            "vcard_path": "",
+            "contact_id": "",
+            "aliases": [],
+            "avatar_data_uri": "",
+        }
+        return {**defaults, **self._read_document("operator.md")}
+
+    def write_operator_profile(self, profile: dict[str, Any]) -> None:
+        _atomic_write(self._root / "operator.md", _write_frontmatter(profile, ""))
+
+    def read_observatory_preferences(self) -> dict[str, Any]:
+        """Return global queue settings; per-chat context remains separate."""
+        defaults: dict[str, Any] = {
+            "pending_days": 7,
+            "relationship_types": [],
+            "group_pending_by_relationship": True,
+            "show_archived_drafts": False,
+        }
+        return {**defaults, **self._read_document("observatory.md")}
+
+    def write_observatory_preferences(self, preferences: dict[str, Any]) -> None:
+        _atomic_write(self._root / "observatory.md", _write_frontmatter(preferences, ""))
+
+    def _read_document(self, filename: str) -> dict[str, Any]:
+        path = self._root / filename
+        if not path.exists():
+            return {}
+        try:
+            meta, _ = _parse_frontmatter(path.read_text(encoding="utf-8"))
+            return meta
+        except Exception as exc:
+            logger.warning("Failed to read %s: %s", path, exc)
+            return {}
 
     # ------------------------------------------------------------------
     # Inbox
@@ -291,6 +337,59 @@ class MessageStore:
             self._chat_dir(draft.chat_id) / "drafts" / f"{draft.uuid}.md",
             _write_frontmatter(meta, draft.proposed_text),
         )
+
+    def archive_draft(self, draft: Draft, *, reason: str) -> Path:
+        """Preserve a reviewed draft outside the active queue instead of deleting it."""
+        source = self._chat_dir(draft.chat_id) / "drafts" / f"{draft.uuid}.md"
+        meta, body = _parse_frontmatter(source.read_text(encoding="utf-8"))
+        meta.update(
+            {
+                "status": "archived",
+                "archived_at": _fmt_dt(datetime.now(UTC)),
+                "archive_reason": reason.strip() or "Archived by operator.",
+                "approved": False,
+            }
+        )
+        destination = self._root / "draft_archive" / f"{draft.uuid}.md"
+        _atomic_write(destination, _write_frontmatter(meta, body))
+        source.unlink()
+        return destination
+
+    def write_contact_review(
+        self,
+        *,
+        chat_id: int,
+        decision: str,
+        identifier: str,
+        notes: str = "",
+    ) -> Path:
+        """Record a local contact decision without creating an Apple Contact."""
+        path = self._root / "contact_reviews" / f"{chat_id}.md"
+        meta = {
+            "chat_id": chat_id,
+            "decision": decision,
+            "identifier": identifier,
+            "updated_at": _fmt_dt(datetime.now(UTC)),
+        }
+        _atomic_write(path, _write_frontmatter(meta, notes.strip()))
+        return path
+
+    def write_contact_candidate(self, *, chat_id: int, name: str, identifier: str) -> Path:
+        """Prepare, but never import, a vCard candidate for explicit operator review."""
+        escaped_name = name.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+        value = identifier.removeprefix("iMessage;-;")
+        field = "EMAIL" if "@" in value else "TEL"
+        body = "\n".join([
+            "BEGIN:VCARD",
+            "VERSION:3.0",
+            f"FN:{escaped_name or value}",
+            f"{field}:{value}",
+            "END:VCARD",
+            "",
+        ])
+        path = self._root / "contact_candidates" / f"{chat_id}.vcf"
+        _atomic_write(path, body)
+        return path
 
     def list_approved_drafts(self) -> list[Path]:
         """Return paths of all draft files where approved: true."""

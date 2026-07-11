@@ -78,6 +78,7 @@ def _find_reply_artifact(
         ("sent", store.data_dir / "sent"),
         ("error", store.data_dir / "errors"),
         ("no_reply_needed", store.data_dir / "no_reply"),
+        ("archived", store.data_dir / "draft_archive"),
     ]
     for status, root in candidates:
         if not root.exists():

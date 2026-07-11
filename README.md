@@ -329,6 +329,19 @@ activity, search results, and archive issues. The GUI reads conversation visibil
 `~/imsg-data/chats/`. Approving in the GUI queues an `outbox/{uuid}.md` file; it does not
 call `imsg rpc send` directly.
 
+The Orbit has two modes: its default operator-and-pending-drafts field, and a selected
+conversation workbench. Selecting a signal holds it in the center and opens that chat;
+clicking open Orbit space or Close restores the queue. Operator identity is stored locally
+in `~/imsg-data/operator.md`; set an optional local `vcard_path` there (or in the Operator
+panel) to use the vCard photo at the center of the Orbit. Queue preferences live in
+`~/imsg-data/observatory.md`, default to the most recent seven days, and support global
+relationship-type filtering, grouping, archived-draft visibility, and older-history review.
+
+Archiving a draft moves its Markdown artifact to `~/imsg-data/draft_archive/`; it never
+deletes the draft. Contact review decisions stay local in `~/imsg-data/contact_reviews/`.
+Preparing a contact writes a vCard candidate under `~/imsg-data/contact_candidates/` for
+explicit review and import; the GUI never creates Apple Contacts automatically.
+
 Optional overrides:
 
 ```bash

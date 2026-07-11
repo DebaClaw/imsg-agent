@@ -9,8 +9,9 @@ approval artifacts instead of sending messages directly.
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -71,24 +72,75 @@ class OperatorService:
             return {
                 "status": self.status(),
                 "attention": archive.attention_items(limit=limit),
-                "pending": pending_replies(
-                    archive,
-                    store,
-                    limit=limit,
-                    max_missing_age_hours=self.config.max_inbox_age_hours,
-                ),
+                "pending": self._pending_rows(archive, store, limit=limit),
                 "recent": archive.recent_chats(limit=limit),
                 "views": self.saved_views(limit=limit),
+                "operator": self.operator_profile(),
+                "preferences": self.observatory_preferences(),
             }
 
-    def pending(self, *, limit: int = 20) -> JSONList:
+    def pending(
+        self,
+        *,
+        limit: int = 20,
+        days: int | None = None,
+        relationships: list[str] | None = None,
+        include_archived: bool | None = None,
+    ) -> JSONList:
         with IMessageArchive(self.db_path) as archive:
-            return pending_replies(
+            return self._pending_rows(
                 archive,
                 MessageStore(self.data_dir),
                 limit=limit,
-                max_missing_age_hours=self.config.max_inbox_age_hours,
+                days=days,
+                relationships=relationships,
+                include_archived=include_archived,
             )
+
+    def operator_profile(self) -> JSON:
+        profile = MessageStore(self.data_dir).read_operator_profile()
+        profile["display_name"] = str(profile.get("display_name") or "Me")
+        profile["avatar_data_uri"] = self._profile_vcard_avatar(profile)
+        return profile
+
+    def update_operator_profile(self, fields: JSON) -> JSON:
+        store = MessageStore(self.data_dir)
+        profile = store.read_operator_profile()
+        allowed = {"display_name", "vcard_path", "contact_id", "aliases", "avatar_data_uri"}
+        for key, value in fields.items():
+            if key in allowed:
+                profile[key] = value
+        store.write_operator_profile(profile)
+        return {"status": "saved", "operator": self.operator_profile()}
+
+    def observatory_preferences(self) -> JSON:
+        return MessageStore(self.data_dir).read_observatory_preferences()
+
+    def update_observatory_preferences(self, fields: JSON) -> JSON:
+        store = MessageStore(self.data_dir)
+        preferences = store.read_observatory_preferences()
+        if "pending_days" in fields:
+            days = fields["pending_days"]
+            if not isinstance(days, int) or days < 0 or days > 3650:
+                raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "pending_days must be 0 to 3650")
+            preferences["pending_days"] = days
+        if "relationship_types" in fields:
+            relationships = fields["relationship_types"]
+            if not isinstance(relationships, list) or not all(
+                isinstance(item, str) for item in relationships
+            ):
+                raise OperatorServiceError(
+                    HTTPStatus.BAD_REQUEST,
+                    "relationship_types must be a list",
+                )
+            preferences["relationship_types"] = relationships
+        for key in ("group_pending_by_relationship", "show_archived_drafts"):
+            if key in fields:
+                if not isinstance(fields[key], bool):
+                    raise OperatorServiceError(HTTPStatus.BAD_REQUEST, f"{key} must be a boolean")
+                preferences[key] = fields[key]
+        store.write_observatory_preferences(preferences)
+        return {"status": "saved", "preferences": store.read_observatory_preferences()}
 
     def attention(self, *, limit: int = 50) -> JSONList:
         with IMessageArchive(self.db_path) as archive:
@@ -234,11 +286,18 @@ class OperatorService:
         }
 
     def discard_draft(self, uuid: str) -> JSON:
+        return self.archive_draft(uuid, reason="Archived by operator.")
+
+    def archive_draft(self, uuid: str, *, reason: str = "Archived by operator.") -> JSON:
+        store = MessageStore(self.data_dir)
         path = self._draft_path(uuid)
-        path.unlink()
+        draft = self._read_draft(store, path)
+        archive_path = store.archive_draft(draft, reason=reason)
         return {
-            "status": "discarded",
+            "status": "archived",
             "draft_uuid": uuid,
+            "chat_id": draft.chat_id,
+            "archive_path": str(archive_path),
         }
 
     def reject_draft(self, uuid: str, *, reasoning: str = "Operator rejected the draft.") -> JSON:
@@ -255,13 +314,44 @@ class OperatorService:
                 reasoning=reasoning,
                 model=draft.model,
             )
-        path.unlink()
+        store.archive_draft(draft, reason=reasoning)
         return {
             "status": "rejected",
             "draft_uuid": uuid,
             "chat_id": draft.chat_id,
             "source_rowid": draft.source_rowid,
         }
+
+    def review_contact(
+        self,
+        *,
+        chat_id: int,
+        decision: str,
+        notes: str = "",
+    ) -> JSON:
+        if decision not in {"keep_local", "ignore_spam", "prepare_contact"}:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "Unknown contact decision")
+        with IMessageArchive(self.db_path) as archive:
+            seed = archive.chat_context_seed(chat_id)
+        if not seed:
+            raise OperatorServiceError(HTTPStatus.NOT_FOUND, "Chat not found")
+        store = MessageStore(self.data_dir)
+        identifier = str(seed.get("identifier") or "")
+        review_path = store.write_contact_review(
+            chat_id=chat_id,
+            decision=decision,
+            identifier=identifier,
+            notes=notes,
+        )
+        result: JSON = {"status": "recorded", "decision": decision, "path": str(review_path)}
+        if decision == "prepare_contact":
+            candidate = store.write_contact_candidate(
+                chat_id=chat_id,
+                name=str(seed.get("name") or ""),
+                identifier=identifier,
+            )
+            result["candidate_path"] = str(candidate)
+        return result
 
     def mark_no_reply(
         self,
@@ -359,6 +449,101 @@ class OperatorService:
         else:
             raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "Unknown service action")
         return {"status": action, "service": service, "state": service_status(service)}
+
+    def _pending_rows(
+        self,
+        archive: IMessageArchive,
+        store: MessageStore,
+        *,
+        limit: int,
+        days: int | None = None,
+        relationships: list[str] | None = None,
+        include_archived: bool | None = None,
+    ) -> JSONList:
+        preferences = store.read_observatory_preferences()
+        pending_days = int(preferences.get("pending_days") or 0) if days is None else days
+        allowed_relationships = (
+            {
+                item.strip().lower()
+                for item in preferences.get("relationship_types", [])
+                if item.strip()
+            }
+            if relationships is None
+            else {item.strip().lower() for item in relationships if item.strip()}
+        )
+        show_archived = bool(preferences.get("show_archived_drafts"))
+        if include_archived is not None:
+            show_archived = include_archived
+        cutoff = datetime.now(UTC) - timedelta(days=pending_days) if pending_days > 0 else None
+        rows: JSONList = []
+        for row in pending_replies(
+            archive,
+            store,
+            limit=500,
+            max_missing_age_hours=self.config.max_inbox_age_hours,
+        ):
+            if row.get("draft_status") == "archived" and not show_archived:
+                continue
+            chat_id = int(str(row["chat_id"]))
+            context = store.read_chat_context(chat_id)
+            relationship = (
+                str(context.get("relationship") or "unclassified").strip()
+                or "unclassified"
+            )
+            row["relationship"] = relationship
+            if allowed_relationships and relationship.lower() not in allowed_relationships:
+                continue
+            if cutoff is not None:
+                timestamp = str(row.get("last_message_at") or "")
+                try:
+                    if datetime.fromisoformat(timestamp.replace("Z", "+00:00")) < cutoff:
+                        continue
+                except ValueError:
+                    pass
+            rows.append(row)
+            if len(rows) >= limit:
+                break
+        return rows
+
+    @staticmethod
+    def _profile_vcard_avatar(profile: JSON) -> str:
+        configured = str(profile.get("avatar_data_uri") or "")
+        if configured:
+            return configured
+        path_value = str(profile.get("vcard_path") or "").strip()
+        if not path_value:
+            return ""
+        path = Path(path_value).expanduser()
+        if not path.is_file() or path.stat().st_size > 8 * 1024 * 1024:
+            return ""
+        try:
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            return ""
+        photo_lines: list[str] = []
+        collecting = False
+        mime = "image/jpeg"
+        for line in lines:
+            upper = line.upper()
+            if upper.startswith("PHOTO"):
+                collecting = True
+                if "TYPE=PNG" in upper:
+                    mime = "image/png"
+                photo_lines.append(line.split(":", 1)[-1])
+                continue
+            if collecting and line.startswith(" "):
+                photo_lines.append(line.strip())
+                continue
+            if collecting:
+                break
+        encoded = "".join(photo_lines).strip()
+        if not encoded:
+            return ""
+        try:
+            base64.b64decode(encoded, validate=True)
+        except ValueError:
+            return ""
+        return f"data:{mime};base64,{encoded}"
 
     def _draft_target_message(
         self,

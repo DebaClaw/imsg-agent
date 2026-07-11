@@ -4,6 +4,8 @@ const state = {
   selectedRow: null,
   selectedChat: null,
   orbit: null,
+  operator: null,
+  preferences: null,
 };
 
 const signalColors = ["--signal-0", "--signal-1", "--signal-2", "--signal-3", "--signal-4"];
@@ -124,7 +126,7 @@ function renderStatus(status) {
   });
 }
 
-function renderOrbit(rows) {
+function renderOrbit(rows, operator = {}) {
   stopOrbit();
   const orbit = document.getElementById("orbit");
   orbit.replaceChildren();
@@ -133,8 +135,17 @@ function renderOrbit(rows) {
   zap.setAttribute("aria-hidden", "true");
   const core = el("button", "core");
   core.type = "button";
-  core.append(el("strong", "", "Me"));
+  const avatar = text(operator.avatar_data_uri);
+  if (avatar) {
+    const image = document.createElement("img");
+    image.className = "core-avatar";
+    image.src = avatar;
+    image.alt = "";
+    core.append(image);
+  }
+  core.append(el("strong", "", text(operator.display_name, "Me")));
   core.append(el("span", "", "operator"));
+  core.addEventListener("click", () => openOperatorProfile());
   orbit.append(svg, core, zap);
   if (!rows.length) {
     orbit.append(el("p", "empty-state", "No inbound signals need attention."));
@@ -319,6 +330,7 @@ function releaseFocusedSignal(orbit) {
   orbit.activeFocus = null;
   orbit.container.classList.remove("is-focusing");
   orbit.zap.classList.remove("active");
+  closeWorkbench();
   if (orbit.focusTimeout) {
     window.clearTimeout(orbit.focusTimeout);
     orbit.focusTimeout = 0;
@@ -509,14 +521,28 @@ function rowButton(row, extra = {}) {
   return button;
 }
 
-function renderPending(rows) {
+function renderPending(rows, preferences = {}) {
   const list = document.getElementById("pendingList");
   list.replaceChildren();
   if (!rows.length) {
     list.append(el("p", "empty-state", "Nothing is waiting for review."));
     return;
   }
-  rows.forEach((row) => list.append(rowButton(row)));
+  if (!preferences.group_pending_by_relationship) {
+    rows.forEach((row) => list.append(rowButton(row)));
+    return;
+  }
+  const groups = new Map();
+  rows.forEach((row) => {
+    const relationship = text(row.relationship, "unclassified");
+    groups.set(relationship, [...(groups.get(relationship) || []), row]);
+  });
+  groups.forEach((groupRows, relationship) => {
+    const group = el("section", "queue-group");
+    group.append(el("h3", "queue-group-title", relationship));
+    groupRows.forEach((row) => group.append(rowButton(row)));
+    list.append(group);
+  });
 }
 
 function renderTable(title, eyebrow, rows) {
@@ -562,9 +588,11 @@ function renderGroupedViews(payload) {
 async function loadOverview() {
   const overview = await api("/api/overview?limit=14");
   state.overview = overview;
+  state.operator = overview.operator || {};
+  state.preferences = overview.preferences || {};
   renderStatus(overview.status);
-  renderOrbit(overview.attention || []);
-  renderPending(overview.pending || []);
+  renderOrbit(overview.attention || [], state.operator);
+  renderPending(overview.pending || [], state.preferences);
 }
 
 async function loadList(view) {
@@ -601,7 +629,20 @@ async function openChat(row) {
   if (!chatId) return;
   const payload = await api(`/api/chats/${chatId}/messages?limit=90`);
   state.selectedChat = payload;
+  document.body.classList.add("chat-selected");
   renderChat(payload, row);
+}
+
+function closeWorkbench() {
+  document.body.classList.remove("chat-selected");
+  state.selectedRow = null;
+  state.selectedChat = null;
+  const pane = document.getElementById("detailPane");
+  pane.replaceChildren();
+  const box = el("div", "empty-state");
+  box.append(el("p", "eyebrow", "selected chat"));
+  box.append(el("h2", "", "Pick a signal"));
+  pane.append(box);
 }
 
 function renderChat(payload, row) {
@@ -612,10 +653,19 @@ function renderChat(payload, row) {
   pane.classList.add("tray-zap");
   const wrap = el("div", "chat-detail");
   const head = el("div", "chat-head");
+  const close = el("button", "close-workbench", "Close");
+  close.type = "button";
+  close.addEventListener("click", () => {
+    const orbit = state.orbit;
+    if (orbit) releaseFocusedSignal(orbit);
+    else closeWorkbench();
+  });
+  head.append(close);
   head.append(el("p", "eyebrow", `chat ${text(row.chat_id)}`));
   head.append(el("h2", "", nameOf(row)));
   head.append(el("p", "", snippet(row.last_text || "", 180)));
   wrap.append(head);
+  wrap.append(renderContactBox(payload, row));
   wrap.append(renderContextBox(payload, row));
 
   if (row.draft_uuid && row.proposed_text && row.draft_status !== "outbox" && row.draft_status !== "sent") {
@@ -641,6 +691,29 @@ function renderChat(payload, row) {
   });
   wrap.append(timeline);
   pane.append(wrap);
+}
+
+function renderContactBox(payload, row) {
+  const box = el("div", "context-box");
+  const matched = text(payload.chat && payload.chat.contacts) || text(row.contacts);
+  box.append(el("p", "eyebrow", matched ? "contact" : "contact review"));
+  box.append(el("p", "", matched || "No synced contact matches this conversation yet."));
+  if (matched) return box;
+  const actions = el("div", "draft-actions contact-actions");
+  [["keep_local", "Keep local"], ["prepare_contact", "Prepare contact"], ["ignore_spam", "Ignore / spam"]]
+    .forEach(([decision, label]) => {
+      const button = el("button", "", label);
+      button.type = "button";
+      button.addEventListener("click", () => runAction(button, async () => {
+        await api("/api/contacts/review", {
+          method: "POST",
+          body: JSON.stringify({ chat_id: Number(row.chat_id), decision }),
+        });
+      }));
+      actions.append(button);
+    });
+  box.append(actions);
+  return box;
 }
 
 function senderLabel(message, payload, row) {
@@ -730,15 +803,15 @@ function renderDraftBox(row) {
   const actions = el("div", "draft-actions");
   const approve = el("button", "", "Approve");
   const save = el("button", "", "Save");
-  const discard = el("button", "", "Discard");
+  const archive = el("button", "", "Archive");
   const reject = el("button", "", "Reject");
-  [approve, save, discard, reject].forEach((button) => {
+  [approve, save, archive, reject].forEach((button) => {
     button.type = "button";
     actions.append(button);
   });
   approve.addEventListener("click", () => runAction(approve, () => approveDraft(row.draft_uuid, draft.input.value)));
   save.addEventListener("click", () => runAction(save, () => saveDraft(row.draft_uuid, draft.input.value)));
-  discard.addEventListener("click", () => runAction(discard, () => discardDraft(row.draft_uuid)));
+  archive.addEventListener("click", () => runAction(archive, () => archiveDraft(row.draft_uuid)));
   reject.addEventListener("click", () => runAction(reject, () => rejectDraft(row.draft_uuid, rejectReason.input.value)));
   box.append(actions);
   return box;
@@ -786,9 +859,9 @@ async function saveDraft(uuid, draftText) {
   await refreshAfterMutation("Draft saved and left unapproved.");
 }
 
-async function discardDraft(uuid) {
-  await api(`/api/drafts/${encodeURIComponent(uuid)}/discard`, { method: "POST" });
-  await refreshAfterMutation("Draft discarded. The file-based workflow remains unchanged.");
+async function archiveDraft(uuid) {
+  await api(`/api/drafts/${encodeURIComponent(uuid)}/archive`, { method: "POST" });
+  await refreshAfterMutation("Draft archived. It is preserved outside the default review queue.");
 }
 
 async function rejectDraft(uuid, reasoning) {
@@ -825,6 +898,7 @@ async function markNoReply(row, reasoning) {
 async function refreshAfterMutation(message) {
   await loadOverview();
   if (state.activeView !== "overview") await loadList(state.activeView);
+  closeWorkbench();
   const pane = document.getElementById("detailPane");
   pane.replaceChildren();
   const box = el("div", "empty-state");
@@ -832,6 +906,66 @@ async function refreshAfterMutation(message) {
   box.append(el("h2", "", "Updated"));
   box.append(el("p", "", message));
   pane.append(box);
+}
+
+function openOperatorProfile() {
+  document.body.classList.add("chat-selected");
+  const pane = document.getElementById("detailPane");
+  pane.replaceChildren();
+  const wrap = el("div", "chat-detail");
+  const profile = state.operator || {};
+  wrap.append(el("p", "eyebrow", "operator identity"));
+  wrap.append(el("h2", "", "Orbit center"));
+  const name = input("Display name", text(profile.display_name, "Me"));
+  const vcard = input("vCard path", text(profile.vcard_path));
+  const aliases = input("Aliases (comma separated)", (profile.aliases || []).join(", "));
+  const save = el("button", "inline-action", "Save operator profile");
+  save.type = "button";
+  save.addEventListener("click", () => runAction(save, async () => {
+    await api("/api/operator", {
+      method: "POST",
+      body: JSON.stringify({ fields: {
+        display_name: name.input.value,
+        vcard_path: vcard.input.value,
+        aliases: aliases.input.value.split(",").map((item) => item.trim()).filter(Boolean),
+      } }),
+    });
+    await loadOverview();
+    closeWorkbench();
+  }));
+  wrap.append(name.label, vcard.label, aliases.label, save);
+  pane.append(wrap);
+}
+
+function openPreferences() {
+  document.body.classList.add("chat-selected");
+  const pane = document.getElementById("detailPane");
+  pane.replaceChildren();
+  const wrap = el("div", "chat-detail");
+  const preferences = state.preferences || {};
+  wrap.append(el("p", "eyebrow", "queue rules"));
+  wrap.append(el("h2", "", "Pending drafts"));
+  const days = input("Show the last N days (0 is all history)", String(preferences.pending_days ?? 7));
+  const relationships = input("Connection types (comma separated)", (preferences.relationship_types || []).join(", "));
+  const grouped = checkbox("Group by connection type", preferences.group_pending_by_relationship !== false);
+  const archived = checkbox("Show archived drafts", Boolean(preferences.show_archived_drafts));
+  const save = el("button", "inline-action", "Save queue settings");
+  save.type = "button";
+  save.addEventListener("click", () => runAction(save, async () => {
+    await api("/api/preferences", {
+      method: "POST",
+      body: JSON.stringify({ fields: {
+        pending_days: Number(days.input.value),
+        relationship_types: relationships.input.value.split(",").map((item) => item.trim()).filter(Boolean),
+        group_pending_by_relationship: grouped.input.checked,
+        show_archived_drafts: archived.input.checked,
+      } }),
+    });
+    await loadOverview();
+    closeWorkbench();
+  }));
+  wrap.append(days.label, relationships.label, grouped.label, archived.label, save);
+  pane.append(wrap);
 }
 
 async function runSearch(event) {
@@ -909,6 +1043,8 @@ function initSkinControls() {
 document.getElementById("refreshButton").addEventListener("click", (event) => {
   runAction(event.currentTarget, loadOverview);
 });
+document.getElementById("operatorButton").addEventListener("click", () => openOperatorProfile());
+document.getElementById("preferencesButton").addEventListener("click", () => openPreferences());
 document.getElementById("opsRefreshButton").addEventListener("click", (event) => {
   runAction(event.currentTarget, loadOps);
 });

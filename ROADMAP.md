@@ -205,6 +205,22 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ✅ Shared read-only service/query layer for CLI, MCP, TUI, and web
 - ⬜ Saved views: unanswered, recently active, quiet relationships, attachment issues
 
+#### Relationship Observatory: Identity, Contacts, and Triage
+- ✅ **Operator identity and preferences**
+  - ✅ Local operator profile with name, vCard/contact reference, aliases, and avatar fallback
+  - ✅ Global pending-window, relationship-type filters, grouping, and older-history controls
+- 🔄 **Contact review and enrichment**
+  - ⬜ Surface matched contact context and synced photo/avatar data in the operator UI
+  - ✅ Add a local review flow for unresolved contacts: keep-local, ignore/spam, or prepare a vCard candidate
+  - ⬜ Link an unresolved conversation to an existing synced contact
+  - ✅ Keep Contacts creation explicit; never promote unknown/spam conversation data automatically
+- ✅ **Orbit conversation mode**
+  - ✅ Switch from the default Orbit plus draft queue to a selected-conversation workbench
+  - ✅ Restore the default operator-and-queue mode only when selection is released
+- ✅ **Non-destructive draft lifecycle**
+  - ✅ Archive drafts with an operator reason instead of deleting Markdown artifacts
+  - ✅ Hide archived drafts by default while preserving an explicit archive view
+
 #### AI Action Layer
 - ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor
 - ✅ `scripts/install_agent_worker_launchd.sh` — install worker as separate LaunchAgent

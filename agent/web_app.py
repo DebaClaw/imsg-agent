@@ -68,8 +68,17 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
             return service.status()
         if parts == ["api", "overview"]:
             return service.overview(limit=_query_int(query, "limit", 12))
+        if parts == ["api", "operator"]:
+            return service.operator_profile()
+        if parts == ["api", "preferences"]:
+            return service.observatory_preferences()
         if parts == ["api", "pending"]:
-            return service.pending(limit=_query_int(query, "limit", 20))
+            return service.pending(
+                limit=_query_int(query, "limit", 20),
+                days=_query_optional_int(query, "days"),
+                relationships=_query_csv(query, "relationships"),
+                include_archived=_query_optional_bool(query, "include_archived"),
+            )
         if parts == ["api", "attention"]:
             return service.attention(limit=_query_int(query, "limit", 50))
         if parts == ["api", "recent"]:
@@ -112,6 +121,11 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
                 return service.edit_draft(uuid, text=_payload_str(payload, "text"))
             if action == "discard":
                 return service.discard_draft(uuid)
+            if action == "archive":
+                return service.archive_draft(
+                    uuid,
+                    reason=_optional_payload_str(payload, "reason") or "Archived by operator.",
+                )
             if action == "reject":
                 return service.reject_draft(
                     uuid,
@@ -129,6 +143,16 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
                 source_rowid=_payload_int(payload, "source_rowid"),
                 reasoning=_payload_str(payload, "reasoning"),
                 model=_optional_payload_str(payload, "model"),
+            )
+        if parts == ["api", "operator"]:
+            return service.update_operator_profile(_payload_dict(payload, "fields"))
+        if parts == ["api", "preferences"]:
+            return service.update_observatory_preferences(_payload_dict(payload, "fields"))
+        if parts == ["api", "contacts", "review"]:
+            return service.review_contact(
+                chat_id=_payload_int(payload, "chat_id"),
+                decision=_payload_str(payload, "decision"),
+                notes=_optional_payload_str(payload, "notes") or "",
             )
         if len(parts) == 4 and parts[:2] == ["api", "chats"] and parts[3] == "context":
             return service.update_chat_context(
@@ -213,6 +237,22 @@ def _query_optional_int(query: dict[str, list[str]], key: str) -> int | None:
         return int(raw)
     except ValueError:
         raise WebAPIError(HTTPStatus.BAD_REQUEST, f"{key} must be an integer") from None
+
+
+def _query_csv(query: dict[str, list[str]], key: str) -> list[str] | None:
+    value = _query_optional_str(query, key)
+    return [item.strip() for item in value.split(",") if item.strip()] if value else None
+
+
+def _query_optional_bool(query: dict[str, list[str]], key: str) -> bool | None:
+    value = _query_optional_str(query, key)
+    if value is None:
+        return None
+    if value.lower() in {"1", "true", "yes"}:
+        return True
+    if value.lower() in {"0", "false", "no"}:
+        return False
+    raise WebAPIError(HTTPStatus.BAD_REQUEST, f"{key} must be a boolean")
 
 
 def _payload_str(payload: JSON, key: str) -> str:

@@ -8,7 +8,7 @@ import pytest
 from agent.archive_store import IMessageArchive
 from agent.config import Config
 from agent.models import Chat, Draft, Message
-from agent.store import MessageStore
+from agent.store import MessageStore, _parse_frontmatter
 from agent.web_app import WebAPIError, WebService
 
 NOW = datetime(2026, 5, 3, 12, 0, tzinfo=UTC)
@@ -93,7 +93,7 @@ def test_web_pending_reads_archive_and_draft_artifact(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
     MessageStore(tmp_path).write_draft(_draft())
 
-    rows = _service(tmp_path).pending(limit=5)
+    rows = _service(tmp_path).pending(limit=5, days=0)
 
     assert len(rows) == 1
     assert rows[0]["chat_id"] == 7
@@ -171,6 +171,63 @@ def test_web_reject_draft_records_no_reply_decision(tmp_path: Path) -> None:
     assert rows == []
     assert not (tmp_path / "chats" / "7" / "drafts" / "draft-1.md").exists()
     assert list((tmp_path / "no_reply").glob("*.md"))
+    assert list((tmp_path / "draft_archive").glob("*.md"))
+
+
+def test_web_archives_draft_without_deleting_the_artifact(tmp_path: Path) -> None:
+    store = MessageStore(tmp_path)
+    store.write_draft(_draft())
+
+    payload = _service(tmp_path).archive_draft("draft-1", reason="Not timely anymore.")
+
+    archive_path = tmp_path / "draft_archive" / "draft-1.md"
+    assert payload["status"] == "archived"
+    assert archive_path.exists()
+    meta, body = _parse_frontmatter(archive_path.read_text(encoding="utf-8"))
+    assert meta["status"] == "archived"
+    assert meta["archive_reason"] == "Not timely anymore."
+    assert body.strip() == "Yep, I can help with that."
+    assert not (tmp_path / "chats" / "7" / "drafts" / "draft-1.md").exists()
+
+
+def test_web_pending_defaults_to_seven_days_and_can_explore_older(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    MessageStore(tmp_path).write_draft(_draft())
+
+    assert _service(tmp_path).pending(limit=5) == []
+    assert len(_service(tmp_path).pending(limit=5, days=0)) == 1
+
+
+def test_web_profile_and_preferences_persist_locally(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+
+    profile = service.update_operator_profile(
+        {"display_name": "Debbie", "aliases": ["+18015550100"]}
+    )
+    preferences = service.update_observatory_preferences(
+        {"pending_days": 14, "relationship_types": ["friend", "family"]}
+    )
+
+    assert profile["operator"]["display_name"] == "Debbie"
+    assert profile["operator"]["aliases"] == ["+18015550100"]
+    assert preferences["preferences"]["pending_days"] == 14
+    assert preferences["preferences"]["relationship_types"] == ["friend", "family"]
+
+
+def test_web_contact_review_stays_local_and_can_prepare_a_vcard(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+
+    payload = _service(tmp_path).review_contact(
+        chat_id=7,
+        decision="prepare_contact",
+        notes="Check this person before importing.",
+    )
+
+    assert payload["decision"] == "prepare_contact"
+    assert (tmp_path / "contact_reviews" / "7.md").exists()
+    candidate = tmp_path / "contact_candidates" / "7.vcf"
+    assert candidate.exists()
+    assert "BEGIN:VCARD" in candidate.read_text(encoding="utf-8")
 
 
 def test_web_mark_no_reply_hides_missing_pending_item(tmp_path: Path) -> None:
