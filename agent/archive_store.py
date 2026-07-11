@@ -786,25 +786,16 @@ class IMessageArchive:
     def attention_items(self, *, limit: int = 50) -> list[ArchiveRow]:
         rows = self._db.execute(
             """
-            WITH latest_messages AS (
-                SELECT
-                    m.*,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY m.chat_id
-                        ORDER BY m.date DESC, m.rowid DESC
-                    ) AS rank
-                FROM messages m
-            )
             SELECT
                 c.id AS chat_id,
                 c.name AS name,
                 c.identifier AS identifier,
                 c.is_group AS is_group,
-                latest_messages.rowid AS message_rowid,
-                latest_messages.sender AS sender,
-                latest_messages.date AS last_message_at,
-                latest_messages.text AS last_text,
-                latest_messages.has_attachments AS has_attachments,
+                latest.rowid AS message_rowid,
+                latest.sender AS sender,
+                latest.date AS last_message_at,
+                latest.text AS last_text,
+                latest.has_attachments AS has_attachments,
                 (
                     SELECT COUNT(*)
                     FROM messages count_messages
@@ -822,12 +813,17 @@ class IMessageArchive:
                         ORDER BY contacts.full_name
                     )
                 ) AS contacts
-            FROM latest_messages
-            JOIN chats c ON c.id = latest_messages.chat_id
-            WHERE latest_messages.rank = 1
-                AND latest_messages.is_from_me = 0
-                AND latest_messages.is_reaction = 0
-            ORDER BY latest_messages.date DESC, latest_messages.rowid DESC
+            FROM chats c
+            JOIN messages latest ON latest.rowid = (
+                SELECT rowid
+                FROM messages
+                WHERE chat_id = c.id
+                ORDER BY date DESC, rowid DESC
+                LIMIT 1
+            )
+            WHERE latest.is_from_me = 0
+                AND latest.is_reaction = 0
+            ORDER BY latest.date DESC, latest.rowid DESC
             LIMIT ?
             """,
             (limit * 4,),

@@ -237,6 +237,15 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Present contact identity and conversation policy together without crossing chat context
   - ✅ Add a dedicated contacts view and complete all actions with local API/test coverage
 
+#### Orbit Performance and Live Data
+- ✅ **Fast initial Orbit**
+  - ✅ Collapse overview reads into one archive session and eliminate repeated queue/context scans
+  - ✅ Read the initial Orbit directly from the local archive without requiring a manual refresh
+  - ✅ Sort Orbit by Favorites and relationship relevance, then most-recent activity; keep attention score as a secondary signal
+- ✅ **Live local updates**
+  - ✅ Detect SQLite/data-artifact changes and refresh the active view without user action
+  - ✅ Keep Refresh as an explicit reconciliation action rather than initial-load plumbing
+
 #### AI Action Layer
 - ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor
 - ✅ `scripts/install_agent_worker_launchd.sh` — install worker as separate LaunchAgent

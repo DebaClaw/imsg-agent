@@ -25,9 +25,10 @@ def pending_replies(
 ) -> list[ArchiveRow]:
     """Return latest-inbound chats decorated with matching draft artifacts."""
     rows = archive.attention_items(limit=max(limit * 10, 50))
+    artifacts = reply_artifact_index(store)
     pending = []
     for row in rows:
-        decorated = _decorate_pending_row(row, store)
+        decorated = _decorate_pending_row(row, store, artifacts=artifacts)
         if decorated.get("draft_status") == "no_reply_needed":
             continue
         if _is_stale_missing(
@@ -42,14 +43,18 @@ def pending_replies(
     return pending
 
 
-def _decorate_pending_row(row: ArchiveRow, store: MessageStore) -> ArchiveRow:
+def _decorate_pending_row(
+    row: ArchiveRow,
+    store: MessageStore,
+    *,
+    artifacts: dict[tuple[int, int], ArchiveRow] | None = None,
+) -> ArchiveRow:
     chat_id = _int_or_none(row.get("chat_id"))
     source_rowid = _int_or_none(row.get("message_rowid"))
-    artifact = (
-        _find_reply_artifact(store, chat_id=chat_id, source_rowid=source_rowid)
-        if chat_id is not None and source_rowid is not None
-        else None
-    )
+    artifact = None
+    if chat_id is not None and source_rowid is not None:
+        index = artifacts if artifacts is not None else reply_artifact_index(store)
+        artifact = index.get((chat_id, source_rowid))
     decorated = dict(row)
     if artifact is None:
         decorated.update(
@@ -72,26 +77,32 @@ def _find_reply_artifact(
     chat_id: int,
     source_rowid: int,
 ) -> ArchiveRow | None:
+    return reply_artifact_index(store).get((chat_id, source_rowid))
+
+
+def reply_artifact_index(store: MessageStore) -> dict[tuple[int, int], ArchiveRow]:
+    """Read each approval artifact once, keyed by its triggering message."""
+    indexed: dict[tuple[int, int], ArchiveRow] = {}
     candidates = [
-        ("draft", store.data_dir / "chats" / str(chat_id) / "drafts"),
-        ("outbox", store.data_dir / "outbox"),
-        ("sent", store.data_dir / "sent"),
-        ("error", store.data_dir / "errors"),
-        ("no_reply_needed", store.data_dir / "no_reply"),
-        ("archived", store.data_dir / "draft_archive"),
+        ("draft", store.data_dir / "chats", "*/drafts/*.md"),
+        ("outbox", store.data_dir / "outbox", "*.md"),
+        ("sent", store.data_dir / "sent", "*.md"),
+        ("error", store.data_dir / "errors", "*.md"),
+        ("no_reply_needed", store.data_dir / "no_reply", "*.md"),
+        ("archived", store.data_dir / "draft_archive", "*.md"),
     ]
-    for status, root in candidates:
+    for status, root, pattern in candidates:
         if not root.exists():
             continue
-        for path in sorted(root.glob("*.md")):
+        for path in sorted(root.glob(pattern)):
             artifact = _read_artifact(path, status=status)
             if artifact is None:
                 continue
-            if artifact.get("chat_id") != chat_id:
-                continue
-            if artifact.get("source_rowid") == source_rowid:
-                return artifact
-    return None
+            chat_id = _int_or_none(artifact.get("chat_id"))
+            source_rowid = _int_or_none(artifact.get("source_rowid"))
+            if chat_id is not None and source_rowid is not None:
+                indexed.setdefault((chat_id, source_rowid), artifact)
+    return indexed
 
 
 def _read_artifact(path: Path, *, status: str) -> ArchiveRow | None:

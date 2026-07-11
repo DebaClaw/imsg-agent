@@ -6,6 +6,7 @@ const state = {
   orbit: null,
   operator: null,
   preferences: null,
+  revision: "",
 };
 
 const signalColors = ["--signal-0", "--signal-1", "--signal-2", "--signal-3", "--signal-4"];
@@ -591,6 +592,7 @@ async function loadOverview() {
   state.overview = overview;
   state.operator = overview.operator || {};
   state.preferences = overview.preferences || {};
+  state.revision = text(overview.revision);
   renderStatus(overview.status);
   renderOrbit(overview.attention || [], state.operator);
   renderPending(overview.pending || [], state.preferences);
@@ -950,11 +952,12 @@ function renderContextBox(payload, row) {
   const professional = checkbox("Professional", Boolean(context.professional));
   const autoApprove = checkbox("Auto approve", Boolean(context.auto_approve));
   const doNotDraft = checkbox("Do not draft", Boolean(context.do_not_draft));
+  const favorite = checkbox("Favorite", Boolean(context.favorite));
   const notes = textarea("Notes", payload.notes || "", "context-notes");
 
   box.append(name.label, participants.label, relationship.label, tone.label, model.label, agentNotes.label);
   const toggles = el("div", "toggle-row");
-  toggles.append(professional.label, autoApprove.label, doNotDraft.label);
+  toggles.append(professional.label, autoApprove.label, doNotDraft.label, favorite.label);
   box.append(toggles, notes.label);
 
   const save = el("button", "inline-action", "Save context");
@@ -973,6 +976,7 @@ function renderContextBox(payload, row) {
           professional: professional.input.checked,
           auto_approve: autoApprove.input.checked,
           do_not_draft: doNotDraft.input.checked,
+          favorite: favorite.input.checked,
         },
         notes: notes.input.value,
       }),

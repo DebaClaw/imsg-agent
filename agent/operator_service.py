@@ -74,14 +74,18 @@ class OperatorService:
     def overview(self, *, limit: int = 12) -> JSON:
         with IMessageArchive(self.db_path) as archive:
             store = MessageStore(self.data_dir)
+            attention = archive.attention_items(limit=max(limit, 50))
+            recent_candidates = archive.recent_chats(limit=max(limit * 10, 100))
+            recent = recent_candidates[:limit]
+            orbit = self._orbit_rows(attention, recent_candidates, store, limit=limit)
             return {
-                "status": self.status(),
-                "attention": archive.attention_items(limit=limit),
+                "status": self._status_from_archive(archive),
+                "attention": orbit,
                 "pending": self._pending_rows(archive, store, limit=limit),
-                "recent": archive.recent_chats(limit=limit),
-                "views": self.saved_views(limit=limit),
+                "recent": recent,
                 "operator": self.operator_profile(),
                 "preferences": self.observatory_preferences(),
+                "revision": self._data_revision(),
             }
 
     def pending(
@@ -182,6 +186,10 @@ class OperatorService:
             "quiet_relationships": quiet,
             "attachment_issues": self.issues(limit=limit)["attachment_issues"],
         }
+
+    def changes(self, *, since: str = "") -> JSON:
+        revision = self._data_revision()
+        return {"revision": revision, "changed": revision != since}
 
     def search(
         self,
@@ -362,6 +370,7 @@ class OperatorService:
             "professional",
             "auto_approve",
             "do_not_draft",
+            "favorite",
             "agent_notes",
             "model",
             "name",
@@ -614,7 +623,7 @@ class OperatorService:
         for row in pending_replies(
             archive,
             store,
-            limit=500,
+            limit=max(limit * 10, 100),
             max_missing_age_hours=self.config.max_inbox_age_hours,
         ):
             if row.get("draft_status") == "archived" and not show_archived:
@@ -639,6 +648,78 @@ class OperatorService:
             if len(rows) >= limit:
                 break
         return rows
+
+    def _orbit_rows(
+        self,
+        attention: JSONList,
+        recent: JSONList,
+        store: MessageStore,
+        *,
+        limit: int,
+    ) -> JSONList:
+        orbit_by_chat = {int(str(row["chat_id"])): dict(row) for row in attention}
+        for row in recent:
+            chat_id = int(str(row["chat_id"]))
+            context = store.read_chat_context(chat_id)
+            if bool(context.get("favorite")) and chat_id not in orbit_by_chat:
+                orbit_by_chat[chat_id] = dict(row)
+        orbit: JSONList = []
+        for row in orbit_by_chat.values():
+            context = store.read_chat_context(int(str(row["chat_id"])))
+            row = dict(row)
+            row["favorite"] = bool(context.get("favorite"))
+            row["relationship"] = str(context.get("relationship") or "unclassified")
+            row["relationship_priority"] = self._relationship_priority(row["relationship"])
+            orbit.append(row)
+        orbit.sort(
+            key=lambda row: (
+                bool(row["favorite"]),
+                int(str(row["relationship_priority"])),
+                str(row.get("last_message_at") or ""),
+                int(str(row.get("score") or 0)),
+            ),
+            reverse=True,
+        )
+        return orbit[:limit]
+
+    @staticmethod
+    def _relationship_priority(relationship: object) -> int:
+        value = str(relationship).lower()
+        if any(term in value for term in ("spouse", "wife", "husband", "partner", "family")):
+            return 4
+        if "close friend" in value:
+            return 3
+        if "friend" in value:
+            return 2
+        if any(term in value for term in ("boss", "coworker", "customer", "vendor")):
+            return 1
+        return 0
+
+    def _status_from_archive(self, archive: IMessageArchive) -> JSON:
+        return {
+            "data_dir": str(self.data_dir),
+            "db_path": str(self.db_path),
+            "archive": archive.archive_stats(),
+            "services": [service_status("monitor"), service_status("worker")],
+        }
+
+    def _data_revision(self) -> str:
+        paths = [
+            self.db_path,
+            self.data_dir / "state.json",
+            self.data_dir / "outbox",
+            self.data_dir / "sent",
+            self.data_dir / "errors",
+            self.data_dir / "no_reply",
+            self.data_dir / "draft_archive",
+        ]
+        stamps = []
+        for path in paths:
+            try:
+                stamps.append(str(path.stat().st_mtime_ns))
+            except OSError:
+                stamps.append("0")
+        return ":".join(stamps)
 
     @staticmethod
     def _profile_vcard_avatar(profile: JSON) -> str:

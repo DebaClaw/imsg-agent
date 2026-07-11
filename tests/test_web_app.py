@@ -284,6 +284,41 @@ def test_web_chat_pages_messages_by_oldest_rowid(tmp_path: Path) -> None:
     assert older["has_more"] is False
 
 
+def test_web_overview_prioritizes_favorite_recent_chat(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    favorite_chat = Chat(
+        id=8,
+        identifier="iMessage;-;+18015550102",
+        name="Lesley",
+        service="iMessage",
+        last_message_at=datetime(2026, 5, 4, 12, 0, tzinfo=UTC),
+        participants=["+18015550102"],
+    )
+    favorite_message = Message(
+        rowid=200,
+        chat_id=8,
+        guid="GUID-200",
+        sender="me",
+        text="Love you.",
+        date=datetime(2026, 5, 4, 12, 0, tzinfo=UTC),
+        is_from_me=True,
+        service="iMessage",
+        has_attachments=False,
+        chat_name="Lesley",
+        participants=["+18015550102"],
+    )
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.upsert_chat(favorite_chat)
+        archive.upsert_message(favorite_message)
+    MessageStore(tmp_path).write_chat_context(8, {"chat_id": 8, "favorite": True})
+
+    payload = _service(tmp_path).overview(limit=5)
+
+    assert payload["attention"][0]["chat_id"] == 8
+    assert payload["attention"][0]["favorite"] is True
+    assert _service(tmp_path).changes(since=str(payload["revision"]))["changed"] is False
+
+
 def test_web_mark_no_reply_hides_missing_pending_item(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
 

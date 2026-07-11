@@ -68,6 +68,8 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
             return service.status()
         if parts == ["api", "overview"]:
             return service.overview(limit=_query_int(query, "limit", 12))
+        if parts == ["api", "changes"]:
+            return service.changes(since=_query_str(query, "since", ""))
         if parts == ["api", "operator"]:
             return service.operator_profile()
         if parts == ["api", "preferences"]:
