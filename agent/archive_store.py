@@ -678,6 +678,7 @@ class IMessageArchive:
         *,
         limit: int = 50,
         before: str | None = None,
+        before_rowid: int | None = None,
         after: str | None = None,
     ) -> list[ArchiveRow]:
         where = ["m.chat_id = ?"]
@@ -685,6 +686,9 @@ class IMessageArchive:
         if before:
             where.append("m.date < ?")
             params.append(before)
+        if before_rowid is not None:
+            where.append("m.rowid < ?")
+            params.append(before_rowid)
         if after:
             where.append("m.date >= ?")
             params.append(after)

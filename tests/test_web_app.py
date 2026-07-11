@@ -266,6 +266,24 @@ def test_web_chat_accepts_a_before_cursor(tmp_path: Path) -> None:
     assert [message["message_rowid"] for message in payload["messages"]] == [100]
 
 
+def test_web_chat_pages_messages_by_oldest_rowid(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        for rowid in (101, 102, 103):
+            message = _message(rowid=rowid)
+            message.text = f"Message {rowid}"
+            archive.upsert_message(message)
+
+    service = _service(tmp_path)
+    newest = service.chat(7, limit=2)
+    older = service.chat(7, limit=2, before_rowid=int(newest["next_before_rowid"]))
+
+    assert [message["message_rowid"] for message in newest["messages"]] == [102, 103]
+    assert newest["has_more"] is True
+    assert [message["message_rowid"] for message in older["messages"]] == [100, 101]
+    assert older["has_more"] is False
+
+
 def test_web_mark_no_reply_hides_missing_pending_item(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
 

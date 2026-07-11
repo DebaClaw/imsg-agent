@@ -233,7 +233,7 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ⬜ Surface synced contact photos/avatars when the connector exports them
 - ⬜ **Conversation workspace**
   - ✅ Edit complete per-chat context: identity, relationship, tone, policy, notes, and drafting model
-  - ⬜ Browse recent transcript with pagination and load older messages on demand
+  - ✅ Browse recent transcript with pagination and load older messages on demand
   - ✅ Present contact identity and conversation policy together without crossing chat context
   - ✅ Add a dedicated contacts view and complete all actions with local API/test coverage
 

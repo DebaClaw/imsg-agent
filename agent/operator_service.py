@@ -199,9 +199,23 @@ class OperatorService:
                 until=until,
             )
 
-    def chat(self, chat_id: int, *, limit: int = 80, before: str | None = None) -> JSON:
+    def chat(
+        self,
+        chat_id: int,
+        *,
+        limit: int = 80,
+        before: str | None = None,
+        before_rowid: int | None = None,
+    ) -> JSON:
         with IMessageArchive(self.db_path) as archive:
-            messages = list(reversed(archive.chat_messages(chat_id, limit=limit, before=before)))
+            newest_first = archive.chat_messages(
+                chat_id,
+                limit=limit + 1,
+                before=before,
+                before_rowid=before_rowid,
+            )
+            has_more = len(newest_first) > limit
+            messages = list(reversed(newest_first[:limit]))
             seed = archive.chat_context_seed(chat_id)
             contacts = archive.chat_contacts(chat_id)
         store = MessageStore(self.data_dir)
@@ -212,6 +226,8 @@ class OperatorService:
             "context": context,
             "notes": notes,
             "messages": messages,
+            "has_more": has_more,
+            "next_before_rowid": messages[0]["message_rowid"] if messages else None,
             "contacts": contacts,
             "contact_review": review,
             "contact_review_notes": review_notes,

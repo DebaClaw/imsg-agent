@@ -870,6 +870,15 @@ button:disabled {
   margin-top: 18px;
 }
 
+.load-older {
+  min-height: 38px;
+  border: 1px solid rgba(248, 244, 236, 0.35);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--paper);
+  font-weight: 800;
+}
+
 .message-row {
   display: grid;
   width: 100%;

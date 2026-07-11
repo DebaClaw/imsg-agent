@@ -739,6 +739,12 @@ function renderChat(payload, row) {
   }
 
   const timeline = el("div", "timeline");
+  if (payload.has_more && payload.next_before_rowid) {
+    const older = el("button", "load-older", "Load older messages");
+    older.type = "button";
+    older.addEventListener("click", () => runAction(older, () => loadOlderMessages(row, payload)));
+    timeline.append(older);
+  }
   (payload.messages || []).forEach((message) => {
     const rowNode = el("div", `message-row ${message.is_from_me ? "mine" : "theirs"}`);
     rowNode.append(el("div", "sender-label", senderLabel(message, payload, row)));
@@ -750,6 +756,17 @@ function renderChat(payload, row) {
   });
   wrap.append(timeline);
   pane.append(wrap);
+}
+
+async function loadOlderMessages(row, payload) {
+  const older = await api(
+    `/api/chats/${row.chat_id}/messages?limit=40&before_rowid=${encodeURIComponent(payload.next_before_rowid)}`,
+  );
+  payload.messages = [...(older.messages || []), ...(payload.messages || [])];
+  payload.has_more = older.has_more;
+  payload.next_before_rowid = older.next_before_rowid;
+  state.selectedChat = payload;
+  renderChat(payload, row);
 }
 
 function renderContactBox(payload, row) {

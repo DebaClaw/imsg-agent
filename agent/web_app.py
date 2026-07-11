@@ -117,6 +117,7 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
                 int(parts[2]),
                 limit=_query_int(query, "limit", 80),
                 before=_query_optional_str(query, "before"),
+                before_rowid=_query_optional_int(query, "before_rowid"),
             )
         raise WebAPIError(HTTPStatus.NOT_FOUND, "Not found")
 
