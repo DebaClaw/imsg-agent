@@ -636,7 +636,16 @@ async function loadContacts(query = "") {
   rows.forEach((row) => {
     const button = el("button", "row-item");
     button.type = "button";
-    button.append(el("h3", "", text(row.full_name, text(row.organization_name, row.contact_id))));
+    const title = el("div", "contact-row-title");
+    if (row.photo_data_uri) {
+      const image = document.createElement("img");
+      image.className = "contact-avatar";
+      image.src = row.photo_data_uri;
+      image.alt = "";
+      title.append(image);
+    }
+    title.append(el("h3", "", text(row.full_name, text(row.organization_name, row.contact_id))));
+    button.append(title);
     button.append(el("p", "", text(row.organization_name)));
     button.append(el("p", "meta-line", `${text(row.contact_points, "0")} contact points`));
     button.addEventListener("click", () => openContact(row.contact_id));
@@ -650,6 +659,13 @@ async function openContact(contactId) {
   list.replaceChildren();
   const panel = el("section", "contact-detail");
   panel.append(el("p", "eyebrow", "synced contact"));
+  if (contact.photo_data_uri) {
+    const image = document.createElement("img");
+    image.className = "contact-avatar large";
+    image.src = contact.photo_data_uri;
+    image.alt = "";
+    panel.append(image);
+  }
   panel.append(el("h2", "", text(contact.full_name, contact.contact_id)));
   if (contact.organization_name) panel.append(el("p", "", contact.organization_name));
   if (contact.notes) panel.append(el("p", "", contact.notes));
@@ -775,6 +791,14 @@ function renderContactBox(payload, row) {
   const matched = linked.map((contact) => text(contact.full_name)).filter(Boolean).join(", ") || text(row.contacts);
   box.append(el("p", "eyebrow", matched ? "contact" : "contact review"));
   box.append(el("p", "", matched || "No synced contact matches this conversation yet."));
+  linked.forEach((contact) => {
+    if (!contact.photo_data_uri) return;
+    const image = document.createElement("img");
+    image.className = "contact-avatar";
+    image.src = contact.photo_data_uri;
+    image.alt = "";
+    box.append(image);
+  });
   if (matched) {
     linked.forEach((contact) => {
       if (!contact.manual) return;

@@ -11,6 +11,7 @@ import os
 import re
 import shlex
 import subprocess
+from base64 import b64decode
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,6 +40,7 @@ class ContactRecord:
     notes: str
     categories_json: str
     metadata_json: str
+    photo_data_uri: str
     points: list[ContactPoint]
 
 
@@ -120,10 +122,42 @@ def contacts_from_json(
                 notes=str(raw.get("notes") or ""),
                 categories_json=json.dumps(categories, ensure_ascii=False),
                 metadata_json=json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                photo_data_uri=contact_photo_data_uri(raw, metadata),
                 points=points,
             )
         )
     return records
+
+
+def contact_photo_data_uri(contact: dict[str, Any], metadata: dict[str, Any]) -> str:
+    """Normalize common contacts-mcp photo export shapes for local display only."""
+    candidate: object = (
+        contact.get("photo")
+        or contact.get("image")
+        or contact.get("thumbnail")
+        or metadata.get("photo")
+        or metadata.get("image")
+    )
+    if isinstance(candidate, str):
+        value = candidate.strip()
+        if value.startswith("data:image/"):
+            return value
+        if _is_base64(value):
+            return f"data:image/jpeg;base64,{value}"
+    if isinstance(candidate, dict):
+        data = candidate.get("data") or candidate.get("base64")
+        mime = str(candidate.get("mimeType") or candidate.get("mime_type") or "image/jpeg")
+        if isinstance(data, str) and _is_base64(data) and mime.startswith("image/"):
+            return f"data:{mime};base64,{data}"
+    return ""
+
+
+def _is_base64(value: str) -> bool:
+    try:
+        b64decode(value, validate=True)
+    except ValueError:
+        return False
+    return bool(value)
 
 
 def contact_points_from_contact(

@@ -22,7 +22,7 @@ from .contact_enrichment import (
 )
 from .models import Attachment, Chat, Message, Reaction
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 ArchiveRow = dict[str, object]
 
@@ -211,6 +211,7 @@ class IMessageArchive:
                 notes TEXT NOT NULL DEFAULT '',
                 categories_json TEXT NOT NULL DEFAULT '[]',
                 metadata_json TEXT NOT NULL DEFAULT '{}',
+                photo_data_uri TEXT NOT NULL DEFAULT '',
                 updated_at TEXT NOT NULL
             );
 
@@ -258,6 +259,7 @@ class IMessageArchive:
         self._ensure_column("attachments", "local_path", "TEXT NOT NULL DEFAULT ''")
         self._ensure_column("attachments", "archived", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("attachments", "archive_error", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column("contacts", "photo_data_uri", "TEXT NOT NULL DEFAULT ''")
         if previous_schema < 4:
             self._db.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
         self.set_meta("schema_version", str(SCHEMA_VERSION))
@@ -915,6 +917,7 @@ class IMessageArchive:
                 contacts.organization_title,
                 contacts.notes,
                 contacts.categories_json,
+                contacts.photo_data_uri,
                 COUNT(contact_points.value) AS contact_points
             FROM contacts
             LEFT JOIN contact_points ON contact_points.contact_id = contacts.contact_id
@@ -933,7 +936,8 @@ class IMessageArchive:
         row = self._db.execute(
             """
             SELECT contact_id, full_name, given_name, family_name, organization_name,
-                organization_title, birthday, notes, categories_json, metadata_json, updated_at
+                organization_title, birthday, notes, categories_json, metadata_json,
+                photo_data_uri, updated_at
             FROM contacts WHERE contact_id = ?
             """,
             (contact_id,),
@@ -957,6 +961,7 @@ class IMessageArchive:
             """
             SELECT DISTINCT contacts.contact_id, contacts.full_name, contacts.organization_name,
                 contacts.organization_title, contacts.notes, contacts.categories_json,
+                contacts.photo_data_uri,
                 CASE WHEN manual.contact_id IS NULL THEN 0 ELSE 1 END AS manual
             FROM contacts
             LEFT JOIN chat_contact_matches matches
@@ -1034,9 +1039,9 @@ class IMessageArchive:
                     INSERT INTO contacts(
                         contact_id, full_name, given_name, family_name,
                         organization_name, organization_title, birthday, notes,
-                        categories_json, metadata_json, updated_at
+                        categories_json, metadata_json, photo_data_uri, updated_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         contact.contact_id,
@@ -1049,6 +1054,7 @@ class IMessageArchive:
                         contact.notes,
                         contact.categories_json,
                         contact.metadata_json,
+                        contact.photo_data_uri,
                         now,
                     ),
                 )

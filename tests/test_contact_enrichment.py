@@ -55,6 +55,14 @@ def test_contacts_from_json_extracts_points() -> None:
     ]
 
 
+def test_contacts_from_json_preserves_a_contact_photo() -> None:
+    records = contacts_from_json(
+        [{"id": "contact-1", "fullName": "Alex", "photo": "aGVsbG8="}]
+    )
+
+    assert records[0].photo_data_uri == "data:image/jpeg;base64,aGVsbG8="
+
+
 def test_load_contacts_expands_user_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 

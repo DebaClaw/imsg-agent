@@ -230,7 +230,7 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Link or unlink a conversation from a synced contact without waiting for heuristic enrichment
   - ✅ Preserve local review decisions and explicit vCard contact candidates for unknown/spam chats
   - ⬜ Create and update Contacts through the installed contacts-mcp connector
-  - ⬜ Surface synced contact photos/avatars when the connector exports them
+  - ✅ Surface synced contact photos/avatars when the connector exports them
 - ⬜ **Conversation workspace**
   - ✅ Edit complete per-chat context: identity, relationship, tone, policy, notes, and drafting model
   - ✅ Browse recent transcript with pagination and load older messages on demand
