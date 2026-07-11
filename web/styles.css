@@ -796,6 +796,15 @@ body.chat-selected .detail {
   height: 72px;
 }
 
+.contact-delete {
+  min-height: 40px;
+  border: 1px solid var(--coral);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--coral);
+  font-weight: 850;
+}
+
 .contact-detail {
   padding: 14px;
   border: 1px solid var(--line);

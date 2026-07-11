@@ -20,7 +20,11 @@ from uuid import uuid4
 from .archive_agent import ArchiveAgentWorker
 from .archive_store import ArchiveRow, IMessageArchive
 from .config import Config
-from .contact_enrichment import contacts_from_json, load_contacts_from_contacts_mcp
+from .contact_enrichment import (
+    contacts_from_json,
+    contacts_mcp_tool,
+    load_contacts_from_contacts_mcp,
+)
 from .drafter import Drafter, OpenAIResponsesDraftingClient
 from .manage_cli import (
     archive_db_path,
@@ -258,6 +262,55 @@ class OperatorService:
             enriched = archive.enrich_chat_contacts()
         return {"status": "synced", **asdict(synced), "matches": asdict(enriched)}
 
+    def create_contact(self, fields: JSON) -> JSON:
+        full_name = str(fields.get("fullName") or "").strip()
+        if not full_name:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "fullName is required")
+        payload = self._contact_payload(fields, include_name=True)
+        try:
+            created = contacts_mcp_tool(
+                command=self.config.contacts_command,
+                tool="create_contact",
+                arguments=payload,
+                store_path=self.config.contacts_store,
+            )
+        except RuntimeError as exc:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        synced = self.sync_contacts()
+        return {"status": "created", "contact": created, "sync": synced}
+
+    def update_contact(self, contact_id: str, fields: JSON) -> JSON:
+        payload = self._contact_payload(fields, include_name=False)
+        if not payload:
+            raise OperatorServiceError(
+                HTTPStatus.BAD_REQUEST,
+                "At least one contact field is required",
+            )
+        try:
+            updated = contacts_mcp_tool(
+                command=self.config.contacts_command,
+                tool="update_contact",
+                arguments={"id": contact_id, **payload},
+                store_path=self.config.contacts_store,
+            )
+        except RuntimeError as exc:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        synced = self.sync_contacts()
+        return {"status": "updated", "contact": updated, "sync": synced}
+
+    def delete_contact(self, contact_id: str) -> JSON:
+        try:
+            deleted = contacts_mcp_tool(
+                command=self.config.contacts_command,
+                tool="delete_contact",
+                arguments={"id": contact_id},
+                store_path=self.config.contacts_store,
+            )
+        except RuntimeError as exc:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        synced = self.sync_contacts()
+        return {"status": "deleted", "contact": deleted, "sync": synced}
+
     def link_contact(self, *, chat_id: int, contact_id: str) -> JSON:
         try:
             with IMessageArchive(self.db_path) as archive:
@@ -272,6 +325,25 @@ class OperatorService:
             archive.unlink_chat_contact(chat_id, contact_id)
             contacts = archive.chat_contacts(chat_id)
         return {"status": "unlinked", "chat_id": chat_id, "contacts": contacts}
+
+    @staticmethod
+    def _contact_payload(fields: JSON, *, include_name: bool) -> JSON:
+        allowed = {
+            "fullName",
+            "givenName",
+            "familyName",
+            "emails",
+            "phones",
+            "addresses",
+            "organization",
+            "birthday",
+            "notes",
+            "categories",
+        }
+        payload = {key: value for key, value in fields.items() if key in allowed}
+        if include_name:
+            payload["fullName"] = str(fields.get("fullName") or "").strip()
+        return payload
 
     def update_chat_context(
         self,

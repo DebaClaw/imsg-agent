@@ -667,16 +667,90 @@ async function openContact(contactId) {
     panel.append(image);
   }
   panel.append(el("h2", "", text(contact.full_name, contact.contact_id)));
-  if (contact.organization_name) panel.append(el("p", "", contact.organization_name));
-  if (contact.notes) panel.append(el("p", "", contact.notes));
+  const name = input("Full name", text(contact.full_name));
+  const organization = input("Organization", text(contact.organization_name));
+  const email = input("Email", contactPoint(contact.points, "email"));
+  const phone = input("Phone", contactPoint(contact.points, "phone"));
+  const categories = input("Categories (comma separated)", safeJsonArray(contact.categories_json).join(", "));
+  const notes = textarea("Notes", text(contact.notes), "short-textarea");
+  panel.append(name.label, organization.label, email.label, phone.label, categories.label, notes.label);
   const points = el("div", "contact-points");
   (contact.points || []).forEach((point) => points.append(el("p", "", `${point.kind}: ${point.original_value || point.value}`)));
   panel.append(points);
   const back = el("button", "ghost-button", "Back to contacts");
   back.type = "button";
   back.addEventListener("click", () => loadContacts());
-  panel.append(back);
+  const save = el("button", "inline-action", "Save contact");
+  save.type = "button";
+  save.addEventListener("click", () => runAction(save, async () => {
+    await api(`/api/contacts/${encodeURIComponent(contactId)}/update`, {
+      method: "POST",
+      body: JSON.stringify({ fields: contactFields(name, organization, email, phone, categories, notes) }),
+    });
+    await openContact(contactId);
+  }));
+  const remove = el("button", "contact-delete", "Archive contact");
+  remove.type = "button";
+  remove.addEventListener("click", () => {
+    if (!window.confirm(`Archive ${text(contact.full_name, contactId)} in contacts-mcp?`)) return;
+    runAction(remove, async () => {
+      await api(`/api/contacts/${encodeURIComponent(contactId)}/delete`, { method: "POST" });
+      await loadContacts();
+    });
+  });
+  panel.append(save, remove, back);
   list.append(panel);
+}
+
+function openNewContact() {
+  const list = document.getElementById("contactsList");
+  list.replaceChildren();
+  const panel = el("section", "contact-detail");
+  panel.append(el("p", "eyebrow", "new contact"));
+  panel.append(el("h2", "", "Create in contacts-mcp"));
+  const name = input("Full name", "");
+  const organization = input("Organization", "");
+  const email = input("Email", "");
+  const phone = input("Phone", "");
+  const categories = input("Categories (comma separated)", "");
+  const notes = textarea("Notes", "", "short-textarea");
+  const create = el("button", "inline-action", "Create contact");
+  create.type = "button";
+  create.addEventListener("click", () => runAction(create, async () => {
+    await api("/api/contacts/create", {
+      method: "POST",
+      body: JSON.stringify({ fields: contactFields(name, organization, email, phone, categories, notes) }),
+    });
+    await loadContacts();
+  }));
+  panel.append(name.label, organization.label, email.label, phone.label, categories.label, notes.label, create);
+  list.append(panel);
+}
+
+function contactFields(name, organization, email, phone, categories, notes) {
+  const fields = {
+    fullName: name.input.value.trim(),
+    notes: notes.input.value,
+    categories: categories.input.value.split(",").map((item) => item.trim()).filter(Boolean),
+  };
+  if (organization.input.value.trim()) fields.organization = { name: organization.input.value.trim() };
+  if (email.input.value.trim()) fields.emails = [{ value: email.input.value.trim(), primary: true }];
+  if (phone.input.value.trim()) fields.phones = [{ value: phone.input.value.trim(), primary: true }];
+  return fields;
+}
+
+function contactPoint(points, kind) {
+  const point = (points || []).find((item) => item.kind === kind);
+  return point ? text(point.original_value || point.value) : "";
+}
+
+function safeJsonArray(value) {
+  try {
+    const parsed = JSON.parse(text(value, "[]"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 async function openChat(row) {
@@ -1196,6 +1270,7 @@ document.getElementById("contactsSyncButton").addEventListener("click", (event) 
     await loadContacts();
   });
 });
+document.getElementById("contactsNewButton").addEventListener("click", () => openNewContact());
 document.querySelectorAll(".rail-button").forEach((button) => {
   button.addEventListener("click", () => runAction(button, async () => {
     const view = button.dataset.view;

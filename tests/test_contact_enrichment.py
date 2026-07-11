@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -66,19 +66,26 @@ def test_contacts_from_json_preserves_a_contact_photo() -> None:
 def test_load_contacts_expands_user_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_run(
-        args: list[str],
+    def fake_tool(
         *,
-        check: bool,
-        capture_output: bool,
-        text: bool,
-        env: dict[str, str],
-    ) -> subprocess.CompletedProcess[str]:
-        captured["args"] = args
-        captured["env"] = env
-        return subprocess.CompletedProcess(args, 0, stdout="[]", stderr="")
+        command: str,
+        tool: str,
+        arguments: dict[str, object],
+        store_path: str | None,
+    ) -> dict[str, object]:
+        captured.update(
+            {
+                "command": command,
+                "tool": tool,
+                "arguments": arguments,
+                "store_path": store_path,
+            }
+        )
+        output = str(arguments["outputPath"])
+        Path(output).write_text("[]", encoding="utf-8")
+        return {"exported": 0}
 
-    monkeypatch.setattr("agent.contact_enrichment.subprocess.run", fake_run)
+    monkeypatch.setattr("agent.contact_enrichment.contacts_mcp_tool", fake_tool)
 
     result = load_contacts_from_contacts_mcp(
         command="bun ${HOME}/src/contacts-mcp/dist/index.js",
@@ -86,28 +93,18 @@ def test_load_contacts_expands_user_paths(monkeypatch: pytest.MonkeyPatch) -> No
     )
 
     assert result == []
-    args = captured["args"]
-    assert isinstance(args, list)
-    assert args[1].startswith("/")
-    env = captured["env"]
-    assert isinstance(env, dict)
-    assert env["CONTACTS_MCP_STORE"].startswith("/")
+    assert captured["tool"] == "export_contacts"
+    assert captured["command"] == "bun ${HOME}/src/contacts-mcp/dist/index.js"
+    assert captured["store_path"] == "~/contacts-store"
 
 
 def test_load_contacts_reports_subprocess_stderr(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_run(
-        args: list[str],
-        *,
-        check: bool,
-        capture_output: bool,
-        text: bool,
-        env: dict[str, str],
-    ) -> subprocess.CompletedProcess[str]:
-        raise subprocess.CalledProcessError(1, args, stderr="bad contacts command")
+    def fake_tool(**_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("bad contacts command")
 
-    monkeypatch.setattr("agent.contact_enrichment.subprocess.run", fake_run)
+    monkeypatch.setattr("agent.contact_enrichment.contacts_mcp_tool", fake_tool)
 
     with pytest.raises(RuntimeError, match="bad contacts command"):
         load_contacts_from_contacts_mcp(command="contacts-mcp")

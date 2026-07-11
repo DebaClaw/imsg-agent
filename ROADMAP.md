@@ -229,7 +229,7 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Browse synced contacts, identifiers, notes, and categories
   - ✅ Link or unlink a conversation from a synced contact without waiting for heuristic enrichment
   - ✅ Preserve local review decisions and explicit vCard contact candidates for unknown/spam chats
-  - ⬜ Create and update Contacts through the installed contacts-mcp connector
+  - ✅ Create, update, and archive Contacts through the installed contacts-mcp connector
   - ✅ Surface synced contact photos/avatars when the connector exports them
 - ⬜ **Conversation workspace**
   - ✅ Edit complete per-chat context: identity, relationship, tone, policy, notes, and drafting model

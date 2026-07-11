@@ -11,6 +11,7 @@ import os
 import re
 import shlex
 import subprocess
+import tempfile
 from base64 import b64decode
 from dataclasses import dataclass
 from typing import Any
@@ -208,28 +209,109 @@ def load_contacts_from_contacts_mcp(
     store_path: str | None = None,
     include_archived: bool = False,
 ) -> list[dict[str, Any]]:
+    with tempfile.TemporaryDirectory(prefix="imsg-agent-contacts-") as tmpdir:
+        output_path = os.path.join(tmpdir, "contacts.json")
+        contacts_mcp_tool(
+            command=command,
+            tool="export_contacts",
+            arguments={
+                "format": "json",
+                "outputPath": output_path,
+                "includeArchived": include_archived,
+            },
+            store_path=store_path,
+        )
+        with open(output_path, encoding="utf-8") as handle:
+            parsed = json.loads(handle.read())
+    if not isinstance(parsed, list):
+        raise ValueError("contacts-mcp export did not return a JSON list")
+    return [item for item in parsed if isinstance(item, dict)]
+
+
+def contacts_mcp_tool(
+    *,
+    command: str,
+    tool: str,
+    arguments: dict[str, Any],
+    store_path: str | None = None,
+) -> dict[str, Any]:
+    """Call one tool on contacts-mcp's local stdio JSON-RPC server."""
     args = [
         os.path.expandvars(os.path.expanduser(part))
         for part in shlex.split(command)
     ]
-    args.extend(["export", "--format", "json", "--output", "-"])
-    if include_archived:
-        args.append("--include-archived")
     env = os.environ.copy()
     if store_path:
         env["CONTACTS_MCP_STORE"] = os.path.expandvars(os.path.expanduser(store_path))
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             args,
-            check=True,
-            capture_output=True,
-            text=True,
-            env=env,
+            stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                text=True,
         )
-    except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or str(exc)).strip()
-        raise RuntimeError(f"contacts-mcp export failed: {detail}") from exc
-    parsed = json.loads(completed.stdout)
-    if not isinstance(parsed, list):
-        raise ValueError("contacts-mcp export did not return a JSON list")
-    return [item for item in parsed if isinstance(item, dict)]
+    except OSError as exc:
+        raise RuntimeError(f"contacts-mcp could not start: {exc}") from exc
+    assert process.stdin is not None
+    assert process.stdout is not None
+    try:
+        _mcp_send(
+            process,
+            1,
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "imsg-agent", "version": "0.1"},
+            },
+        )
+        _mcp_response(process, 1)
+        _mcp_send(process, 2, "tools/call", {"name": tool, "arguments": arguments})
+        response = _mcp_response(process, 2)
+    finally:
+        process.terminate()
+        process.wait(timeout=2)
+    result = response.get("result")
+    if not isinstance(result, dict) or result.get("isError"):
+        raise RuntimeError(f"contacts-mcp {tool} failed: {response}")
+    content = result.get("content")
+    if not isinstance(content, list) or not content or not isinstance(content[0], dict):
+        return {}
+    text = content[0].get("text")
+    if not isinstance(text, str):
+        return {}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return {"message": text}
+    return parsed if isinstance(parsed, dict) else {"result": parsed}
+
+
+def _mcp_send(
+    process: subprocess.Popen[str],
+    request_id: int,
+    method: str,
+    params: dict[str, Any],
+) -> None:
+    assert process.stdin is not None
+    request = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+    process.stdin.write(json.dumps(request) + "\n")
+    process.stdin.flush()
+
+
+def _mcp_response(process: subprocess.Popen[str], request_id: int) -> dict[str, Any]:
+    assert process.stdout is not None
+    for _ in range(200):
+        line = process.stdout.readline()
+        if not line:
+            stderr = process.stderr.read() if process.stderr is not None else ""
+            raise RuntimeError(f"contacts-mcp stopped unexpectedly: {stderr.strip()}")
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("id") == request_id and isinstance(payload, dict):
+            return payload
+    raise RuntimeError("contacts-mcp did not respond")

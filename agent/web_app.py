@@ -178,6 +178,12 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
                 chat_id=_payload_int(payload, "chat_id"),
                 contact_id=_payload_str(payload, "contact_id"),
             )
+        if parts == ["api", "contacts", "create"]:
+            return service.create_contact(_payload_dict(payload, "fields"))
+        if len(parts) == 4 and parts[:2] == ["api", "contacts"] and parts[3] == "update":
+            return service.update_contact(parts[2], _payload_dict(payload, "fields"))
+        if len(parts) == 4 and parts[:2] == ["api", "contacts"] and parts[3] == "delete":
+            return service.delete_contact(parts[2])
         if len(parts) == 4 and parts[:2] == ["api", "chats"] and parts[3] == "context":
             return service.update_chat_context(
                 int(parts[2]),
