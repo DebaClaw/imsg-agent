@@ -20,6 +20,7 @@ from uuid import uuid4
 from .archive_agent import ArchiveAgentWorker
 from .archive_store import ArchiveRow, IMessageArchive
 from .config import Config
+from .contact_enrichment import contacts_from_json, load_contacts_from_contacts_mcp
 from .drafter import Drafter, OpenAIResponsesDraftingClient
 from .manage_cli import (
     archive_db_path,
@@ -198,17 +199,63 @@ class OperatorService:
                 until=until,
             )
 
-    def chat(self, chat_id: int, *, limit: int = 80) -> JSON:
+    def chat(self, chat_id: int, *, limit: int = 80, before: str | None = None) -> JSON:
         with IMessageArchive(self.db_path) as archive:
-            messages = list(reversed(archive.chat_messages(chat_id, limit=limit)))
+            messages = list(reversed(archive.chat_messages(chat_id, limit=limit, before=before)))
             seed = archive.chat_context_seed(chat_id)
-        context, notes = MessageStore(self.data_dir).read_chat_context_document(chat_id)
+            contacts = archive.chat_contacts(chat_id)
+        store = MessageStore(self.data_dir)
+        context, notes = store.read_chat_context_document(chat_id)
+        review, review_notes = store.read_contact_review(chat_id)
         return {
             "chat": seed,
             "context": context,
             "notes": notes,
             "messages": messages,
+            "contacts": contacts,
+            "contact_review": review,
+            "contact_review_notes": review_notes,
         }
+
+    def contacts(self, *, limit: int = 50, query: str = "") -> JSONList:
+        with IMessageArchive(self.db_path) as archive:
+            return archive.contacts(limit=limit, query=query)
+
+    def contact(self, contact_id: str) -> JSON:
+        with IMessageArchive(self.db_path) as archive:
+            detail = archive.contact(contact_id)
+        if not detail:
+            raise OperatorServiceError(HTTPStatus.NOT_FOUND, "Contact not found")
+        return detail
+
+    def sync_contacts(self) -> JSON:
+        try:
+            raw = load_contacts_from_contacts_mcp(
+                command=self.config.contacts_command,
+                store_path=self.config.contacts_store,
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        contacts = contacts_from_json(raw)
+        with IMessageArchive(self.db_path) as archive:
+            synced = archive.replace_contacts(contacts)
+            enriched = archive.enrich_chat_contacts()
+        return {"status": "synced", **asdict(synced), "matches": asdict(enriched)}
+
+    def link_contact(self, *, chat_id: int, contact_id: str) -> JSON:
+        try:
+            with IMessageArchive(self.db_path) as archive:
+                archive.link_chat_contact(chat_id, contact_id)
+                contacts = archive.chat_contacts(chat_id)
+        except ValueError as exc:
+            raise OperatorServiceError(HTTPStatus.NOT_FOUND, str(exc)) from exc
+        return {"status": "linked", "chat_id": chat_id, "contacts": contacts}
+
+    def unlink_contact(self, *, chat_id: int, contact_id: str) -> JSON:
+        with IMessageArchive(self.db_path) as archive:
+            archive.unlink_chat_contact(chat_id, contact_id)
+            contacts = archive.chat_contacts(chat_id)
+        return {"status": "unlinked", "chat_id": chat_id, "contacts": contacts}
 
     def update_chat_context(
         self,

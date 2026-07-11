@@ -72,6 +72,13 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
             return service.operator_profile()
         if parts == ["api", "preferences"]:
             return service.observatory_preferences()
+        if parts == ["api", "contacts"]:
+            return service.contacts(
+                limit=_query_int(query, "limit", 50),
+                query=_query_str(query, "q", ""),
+            )
+        if len(parts) == 3 and parts[:2] == ["api", "contacts"]:
+            return service.contact(parts[2])
         if parts == ["api", "pending"]:
             return service.pending(
                 limit=_query_int(query, "limit", 20),
@@ -106,7 +113,11 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
         if len(parts) == 4 and parts[:3] == ["api", "chats"] and parts[3] == "messages":
             raise WebAPIError(HTTPStatus.BAD_REQUEST, "Missing chat id")
         if len(parts) == 4 and parts[:2] == ["api", "chats"] and parts[3] == "messages":
-            return service.chat(int(parts[2]), limit=_query_int(query, "limit", 80))
+            return service.chat(
+                int(parts[2]),
+                limit=_query_int(query, "limit", 80),
+                before=_query_optional_str(query, "before"),
+            )
         raise WebAPIError(HTTPStatus.NOT_FOUND, "Not found")
 
     def _route_post(self, path: str, payload: JSON) -> JSON:
@@ -153,6 +164,18 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
                 chat_id=_payload_int(payload, "chat_id"),
                 decision=_payload_str(payload, "decision"),
                 notes=_optional_payload_str(payload, "notes") or "",
+            )
+        if parts == ["api", "contacts", "sync"]:
+            return service.sync_contacts()
+        if parts == ["api", "contacts", "link"]:
+            return service.link_contact(
+                chat_id=_payload_int(payload, "chat_id"),
+                contact_id=_payload_str(payload, "contact_id"),
+            )
+        if parts == ["api", "contacts", "unlink"]:
+            return service.unlink_contact(
+                chat_id=_payload_int(payload, "chat_id"),
+                contact_id=_payload_str(payload, "contact_id"),
             )
         if len(parts) == 4 and parts[:2] == ["api", "chats"] and parts[3] == "context":
             return service.update_chat_context(

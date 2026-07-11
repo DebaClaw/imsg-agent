@@ -760,6 +760,29 @@ body.chat-selected .detail {
   text-transform: none;
 }
 
+.contact-select {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 10px;
+  border: 1px solid rgba(248, 244, 236, 0.3);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--paper);
+}
+
+.contact-detail,
+.contact-points {
+  display: grid;
+  gap: 10px;
+}
+
+.contact-detail {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
 .field textarea {
   min-height: 112px;
   resize: vertical;

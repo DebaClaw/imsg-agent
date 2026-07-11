@@ -103,6 +103,7 @@ function setActiveView(view) {
     "hidden",
     !["pending", "attention", "recent", "views", "issues"].includes(view),
   );
+  document.getElementById("contactsView").classList.toggle("hidden", view !== "contacts");
   document.getElementById("searchView").classList.toggle("hidden", view !== "search");
   document.getElementById("opsView").classList.toggle("hidden", view !== "ops");
 }
@@ -623,6 +624,45 @@ async function loadList(view) {
   }
 }
 
+async function loadContacts(query = "") {
+  setActiveView("contacts");
+  const rows = await api(`/api/contacts?limit=100&q=${encodeURIComponent(query)}`);
+  const list = document.getElementById("contactsList");
+  list.replaceChildren();
+  if (!rows.length) {
+    list.append(el("p", "empty-state compact", "No synced contacts match this search."));
+    return;
+  }
+  rows.forEach((row) => {
+    const button = el("button", "row-item");
+    button.type = "button";
+    button.append(el("h3", "", text(row.full_name, text(row.organization_name, row.contact_id))));
+    button.append(el("p", "", text(row.organization_name)));
+    button.append(el("p", "meta-line", `${text(row.contact_points, "0")} contact points`));
+    button.addEventListener("click", () => openContact(row.contact_id));
+    list.append(button);
+  });
+}
+
+async function openContact(contactId) {
+  const contact = await api(`/api/contacts/${encodeURIComponent(contactId)}`);
+  const list = document.getElementById("contactsList");
+  list.replaceChildren();
+  const panel = el("section", "contact-detail");
+  panel.append(el("p", "eyebrow", "synced contact"));
+  panel.append(el("h2", "", text(contact.full_name, contact.contact_id)));
+  if (contact.organization_name) panel.append(el("p", "", contact.organization_name));
+  if (contact.notes) panel.append(el("p", "", contact.notes));
+  const points = el("div", "contact-points");
+  (contact.points || []).forEach((point) => points.append(el("p", "", `${point.kind}: ${point.original_value || point.value}`)));
+  panel.append(points);
+  const back = el("button", "ghost-button", "Back to contacts");
+  back.type = "button";
+  back.addEventListener("click", () => loadContacts());
+  panel.append(back);
+  list.append(panel);
+}
+
 async function openChat(row) {
   state.selectedRow = row;
   const chatId = row.chat_id;
@@ -630,7 +670,11 @@ async function openChat(row) {
   document.body.classList.add("chat-selected");
   renderChatLoading(row);
   try {
-    const payload = await api(`/api/chats/${chatId}/messages?limit=40`);
+    const [payload, contacts] = await Promise.all([
+      api(`/api/chats/${chatId}/messages?limit=40`),
+      api("/api/contacts?limit=100"),
+    ]);
+    payload.available_contacts = contacts;
     state.selectedChat = payload;
     renderChat(payload, row);
   } catch (error) {
@@ -710,10 +754,37 @@ function renderChat(payload, row) {
 
 function renderContactBox(payload, row) {
   const box = el("div", "context-box");
-  const matched = text(payload.chat && payload.chat.contacts) || text(row.contacts);
+  const linked = payload.contacts || [];
+  const matched = linked.map((contact) => text(contact.full_name)).filter(Boolean).join(", ") || text(row.contacts);
   box.append(el("p", "eyebrow", matched ? "contact" : "contact review"));
   box.append(el("p", "", matched || "No synced contact matches this conversation yet."));
-  if (matched) return box;
+  if (matched) {
+    linked.forEach((contact) => {
+      if (!contact.manual) return;
+      const unlink = el("button", "inline-action", "Unlink contact");
+      unlink.type = "button";
+      unlink.addEventListener("click", () => runAction(unlink, async () => {
+        await api("/api/contacts/unlink", { method: "POST", body: JSON.stringify({ chat_id: Number(row.chat_id), contact_id: contact.contact_id }) });
+        await openChat(row);
+      }));
+      box.append(unlink);
+    });
+    return box;
+  }
+  const select = document.createElement("select");
+  select.className = "contact-select";
+  select.append(new Option("Link a synced contact", ""));
+  (payload.available_contacts || []).forEach((contact) => {
+    select.append(new Option(text(contact.full_name, contact.contact_id), contact.contact_id));
+  });
+  const link = el("button", "inline-action", "Link contact");
+  link.type = "button";
+  link.addEventListener("click", () => runAction(link, async () => {
+    if (!select.value) throw new Error("Choose a synced contact first.");
+    await api("/api/contacts/link", { method: "POST", body: JSON.stringify({ chat_id: Number(row.chat_id), contact_id: select.value }) });
+    await openChat(row);
+  }));
+  box.append(select, link);
   const actions = el("div", "draft-actions contact-actions");
   [["keep_local", "Keep local"], ["prepare_contact", "Prepare contact"], ["ignore_spam", "Ignore / spam"]]
     .forEach(([decision, label]) => {
@@ -757,12 +828,16 @@ function renderContextBox(payload, row) {
 
   const relationship = input("Relationship", context.relationship || "");
   const tone = input("Tone", context.tone || "");
+  const name = input("Conversation name", context.name || text(payload.chat && payload.chat.name));
+  const participants = input("Participants (comma separated)", (context.participants || payload.chat?.participants || []).join(", "));
+  const model = input("Draft model", context.model || "");
+  const agentNotes = textarea("Agent notes", context.agent_notes || "", "short-textarea");
   const professional = checkbox("Professional", Boolean(context.professional));
   const autoApprove = checkbox("Auto approve", Boolean(context.auto_approve));
   const doNotDraft = checkbox("Do not draft", Boolean(context.do_not_draft));
   const notes = textarea("Notes", payload.notes || "", "context-notes");
 
-  box.append(relationship.label, tone.label);
+  box.append(name.label, participants.label, relationship.label, tone.label, model.label, agentNotes.label);
   const toggles = el("div", "toggle-row");
   toggles.append(professional.label, autoApprove.label, doNotDraft.label);
   box.append(toggles, notes.label);
@@ -776,6 +851,10 @@ function renderContextBox(payload, row) {
         fields: {
           relationship: relationship.input.value,
           tone: tone.input.value,
+          name: name.input.value,
+          participants: participants.input.value.split(",").map((item) => item.trim()).filter(Boolean),
+          model: model.input.value || null,
+          agent_notes: agentNotes.input.value,
           professional: professional.input.checked,
           auto_approve: autoApprove.input.checked,
           do_not_draft: doNotDraft.input.checked,
@@ -1066,12 +1145,23 @@ document.getElementById("opsRefreshButton").addEventListener("click", (event) =>
 document.getElementById("searchForm").addEventListener("submit", (event) => {
   runAction(event.submitter, () => runSearch(event));
 });
+document.getElementById("contactsSearchForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runAction(event.submitter, () => loadContacts(document.getElementById("contactsSearchInput").value.trim()));
+});
+document.getElementById("contactsSyncButton").addEventListener("click", (event) => {
+  runAction(event.currentTarget, async () => {
+    await api("/api/contacts/sync", { method: "POST" });
+    await loadContacts();
+  });
+});
 document.querySelectorAll(".rail-button").forEach((button) => {
   button.addEventListener("click", () => runAction(button, async () => {
     const view = button.dataset.view;
     setActiveView(view);
     if (view === "overview") await loadOverview();
     if (["pending", "attention", "recent", "views", "issues"].includes(view)) await loadList(view);
+    if (view === "contacts") await loadContacts();
     if (view === "ops") await loadOps();
   }));
 });

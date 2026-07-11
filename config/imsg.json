@@ -12,6 +12,8 @@
   "nudge_after_hours": 72,
   "default_service": "auto",
   "max_inbox_age_hours": 48,
+  "contacts_command": "contacts-mcp",
+  "contacts_store": null,
   "quiet_hours_start": null,
   "quiet_hours_end": null
 }

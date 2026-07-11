@@ -374,6 +374,16 @@ class MessageStore:
         _atomic_write(path, _write_frontmatter(meta, notes.strip()))
         return path
 
+    def read_contact_review(self, chat_id: int) -> tuple[dict[str, Any], str]:
+        path = self._root / "contact_reviews" / f"{chat_id}.md"
+        if not path.exists():
+            return {}, ""
+        try:
+            return _parse_frontmatter(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Failed to read contact review for %d: %s", chat_id, exc)
+            return {}, ""
+
     def write_contact_candidate(self, *, chat_id: int, name: str, identifier: str) -> Path:
         """Prepare, but never import, a vCard candidate for explicit operator review."""
         escaped_name = name.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")

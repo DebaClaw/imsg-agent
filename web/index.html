@@ -17,6 +17,7 @@
         <button class="rail-button" data-view="pending" type="button">Drafts</button>
         <button class="rail-button" data-view="attention" type="button">Attention</button>
         <button class="rail-button" data-view="recent" type="button">Recent</button>
+        <button class="rail-button" data-view="contacts" type="button">Contacts</button>
         <button class="rail-button" data-view="search" type="button">Search</button>
         <button class="rail-button" data-view="views" type="button">Views</button>
         <button class="rail-button" data-view="issues" type="button">Issues</button>
@@ -98,6 +99,23 @@
               <button type="submit">Search</button>
             </form>
             <div class="table-list" id="searchResults"></div>
+          </div>
+        </section>
+
+        <section class="workbench hidden" id="contactsView">
+          <div class="list-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">contacts-mcp archive</p>
+                <h2>People and identities</h2>
+              </div>
+              <button class="ghost-button" id="contactsSyncButton" type="button">Sync contacts</button>
+            </div>
+            <form class="search-form" id="contactsSearchForm">
+              <input id="contactsSearchInput" autocomplete="off" placeholder="name or organization" />
+              <button type="submit">Search</button>
+            </form>
+            <div class="table-list" id="contactsList"></div>
           </div>
         </section>
 

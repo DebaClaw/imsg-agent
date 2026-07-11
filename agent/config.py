@@ -28,6 +28,8 @@ class Config:
     draft_model: str
     maintenance_interval_seconds: float
     nudge_after_hours: int
+    contacts_command: str
+    contacts_store: str | None
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -62,4 +64,9 @@ def load_config(path: Path | None = None) -> Config:
         draft_model=str(model),
         maintenance_interval_seconds=float(data.get("maintenance_interval_seconds", 5.0)),
         nudge_after_hours=int(data.get("nudge_after_hours", 72)),
+        contacts_command=str(
+            os.environ.get("IMSG_CONTACTS_COMMAND")
+            or data.get("contacts_command", "contacts-mcp")
+        ),
+        contacts_store=os.environ.get("IMSG_CONTACTS_STORE") or data.get("contacts_store"),
     )

@@ -22,7 +22,7 @@ from .contact_enrichment import (
 )
 from .models import Attachment, Chat, Message, Reaction
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 ArchiveRow = dict[str, object]
 
@@ -244,6 +244,15 @@ class IMessageArchive:
                 ON contact_points(kind, value);
             CREATE INDEX IF NOT EXISTS idx_chat_contact_matches_chat
                 ON chat_contact_matches(chat_id);
+
+            CREATE TABLE IF NOT EXISTS manual_contact_links (
+                chat_id INTEGER NOT NULL,
+                contact_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(chat_id, contact_id),
+                FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+                FOREIGN KEY (contact_id) REFERENCES contacts(contact_id) ON DELETE CASCADE
+            );
             """
         )
         self._ensure_column("attachments", "local_path", "TEXT NOT NULL DEFAULT ''")
@@ -890,6 +899,98 @@ class IMessageArchive:
             (limit,),
         ).fetchall()
         return [self._row_to_dict(row) for row in rows]
+
+    def contacts(self, *, limit: int = 50, query: str = "") -> list[ArchiveRow]:
+        pattern = f"%{query.strip()}%"
+        rows = self._db.execute(
+            """
+            SELECT
+                contacts.contact_id,
+                contacts.full_name,
+                contacts.organization_name,
+                contacts.organization_title,
+                contacts.notes,
+                contacts.categories_json,
+                COUNT(contact_points.value) AS contact_points
+            FROM contacts
+            LEFT JOIN contact_points ON contact_points.contact_id = contacts.contact_id
+            WHERE contacts.full_name LIKE ?
+                OR contacts.organization_name LIKE ?
+                OR contacts.contact_id LIKE ?
+            GROUP BY contacts.contact_id
+            ORDER BY contacts.full_name COLLATE NOCASE, contacts.contact_id
+            LIMIT ?
+            """,
+            (pattern, pattern, pattern, limit),
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def contact(self, contact_id: str) -> ArchiveRow:
+        row = self._db.execute(
+            """
+            SELECT contact_id, full_name, given_name, family_name, organization_name,
+                organization_title, birthday, notes, categories_json, metadata_json, updated_at
+            FROM contacts WHERE contact_id = ?
+            """,
+            (contact_id,),
+        ).fetchone()
+        if row is None:
+            return {}
+        detail = self._row_to_dict(row)
+        points = self._db.execute(
+            """
+            SELECT kind, value, original_value, label, primary_flag
+            FROM contact_points WHERE contact_id = ?
+            ORDER BY primary_flag DESC, kind, value
+            """,
+            (contact_id,),
+        ).fetchall()
+        detail["points"] = [self._row_to_dict(point) for point in points]
+        return detail
+
+    def chat_contacts(self, chat_id: int) -> list[ArchiveRow]:
+        rows = self._db.execute(
+            """
+            SELECT DISTINCT contacts.contact_id, contacts.full_name, contacts.organization_name,
+                contacts.organization_title, contacts.notes, contacts.categories_json,
+                CASE WHEN manual.contact_id IS NULL THEN 0 ELSE 1 END AS manual
+            FROM contacts
+            LEFT JOIN chat_contact_matches matches
+                ON matches.contact_id = contacts.contact_id
+                AND matches.chat_id = ?
+                AND matches.status IN ('matched', 'ambiguous')
+            LEFT JOIN manual_contact_links manual
+                ON manual.contact_id = contacts.contact_id AND manual.chat_id = ?
+            WHERE matches.contact_id IS NOT NULL OR manual.contact_id IS NOT NULL
+            ORDER BY manual DESC, contacts.full_name COLLATE NOCASE
+            """,
+            (chat_id, chat_id),
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def link_chat_contact(self, chat_id: int, contact_id: str) -> None:
+        if self._db.execute("SELECT 1 FROM chats WHERE id = ?", (chat_id,)).fetchone() is None:
+            raise ValueError("Chat not found")
+        contact = self._db.execute(
+            "SELECT 1 FROM contacts WHERE contact_id = ?", (contact_id,)
+        ).fetchone()
+        if contact is None:
+            raise ValueError("Contact not found")
+        with self._db:
+            self._db.execute(
+                """
+                INSERT OR IGNORE INTO manual_contact_links(chat_id, contact_id, created_at)
+                VALUES(?, ?, ?)
+                """,
+                (chat_id, contact_id, _fmt_dt(datetime.now(UTC))),
+            )
+
+    def unlink_chat_contact(self, chat_id: int, contact_id: str) -> None:
+        with self._db:
+            self._db.execute(
+                "DELETE FROM manual_contact_links WHERE chat_id = ? AND contact_id = ?",
+                (chat_id, contact_id),
+            )
 
     def attachment_issues(self, *, limit: int = 50) -> list[ArchiveRow]:
         rows = self._db.execute(

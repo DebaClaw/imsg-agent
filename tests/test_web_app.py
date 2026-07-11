@@ -7,6 +7,7 @@ import pytest
 
 from agent.archive_store import IMessageArchive
 from agent.config import Config
+from agent.contact_enrichment import contacts_from_json
 from agent.models import Chat, Draft, Message
 from agent.store import MessageStore, _parse_frontmatter
 from agent.web_app import WebAPIError, WebService
@@ -30,6 +31,8 @@ def _config(tmp_path: Path, *, openai_api_key: str | None = None) -> Config:
         draft_model="gpt-5.5",
         maintenance_interval_seconds=5.0,
         nudge_after_hours=72,
+        contacts_command="contacts-mcp",
+        contacts_store=None,
     )
 
 
@@ -228,6 +231,39 @@ def test_web_contact_review_stays_local_and_can_prepare_a_vcard(tmp_path: Path) 
     candidate = tmp_path / "contact_candidates" / "7.vcf"
     assert candidate.exists()
     assert "BEGIN:VCARD" in candidate.read_text(encoding="utf-8")
+
+
+def test_web_browses_and_manually_links_synced_contacts(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.replace_contacts(
+            contacts_from_json(
+                [{"id": "contact-1", "fullName": "Alex Appleseed", "phones": []}]
+            )
+        )
+
+    service = _service(tmp_path)
+    contacts = service.contacts(limit=10)
+    linked = service.link_contact(chat_id=7, contact_id="contact-1")
+    chat = service.chat(7)
+    unlinked = service.unlink_contact(chat_id=7, contact_id="contact-1")
+
+    assert contacts[0]["full_name"] == "Alex Appleseed"
+    assert linked["contacts"][0]["manual"] == 1
+    assert chat["contacts"][0]["contact_id"] == "contact-1"
+    assert unlinked["contacts"] == []
+
+
+def test_web_chat_accepts_a_before_cursor(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    later = _message(rowid=101)
+    later.date = datetime(2026, 5, 4, 12, 0, tzinfo=UTC)
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.upsert_message(later)
+
+    payload = _service(tmp_path).chat(7, before="2026-05-04T00:00:00Z")
+
+    assert [message["message_rowid"] for message in payload["messages"]] == [100]
 
 
 def test_web_mark_no_reply_hides_missing_pending_item(tmp_path: Path) -> None:

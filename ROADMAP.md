@@ -223,6 +223,20 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Archive drafts with an operator reason instead of deleting Markdown artifacts
   - ✅ Hide archived drafts by default while preserving an explicit archive view
 
+#### Full Contact and Conversation Management
+- 🔄 **contacts-mcp integration**
+  - ✅ Configure and run an explicit contacts-mcp sync from the web UI
+  - ✅ Browse synced contacts, identifiers, notes, and categories
+  - ✅ Link or unlink a conversation from a synced contact without waiting for heuristic enrichment
+  - ✅ Preserve local review decisions and explicit vCard contact candidates for unknown/spam chats
+  - ⬜ Create and update Contacts through the installed contacts-mcp connector
+  - ⬜ Surface synced contact photos/avatars when the connector exports them
+- ⬜ **Conversation workspace**
+  - ✅ Edit complete per-chat context: identity, relationship, tone, policy, notes, and drafting model
+  - ⬜ Browse recent transcript with pagination and load older messages on demand
+  - ✅ Present contact identity and conversation policy together without crossing chat context
+  - ✅ Add a dedicated contacts view and complete all actions with local API/test coverage
+
 #### AI Action Layer
 - ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor
 - ✅ `scripts/install_agent_worker_launchd.sh` — install worker as separate LaunchAgent
