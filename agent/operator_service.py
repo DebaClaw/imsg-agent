@@ -108,8 +108,22 @@ class OperatorService:
 
     def operator_profile(self) -> JSON:
         profile = MessageStore(self.data_dir).read_operator_profile()
-        profile["display_name"] = str(profile.get("display_name") or "Me")
-        profile["avatar_data_uri"] = self._profile_vcard_avatar(profile)
+        contact_id = str(profile.get("contact_id") or "").strip()
+        contact: JSON = {}
+        if contact_id:
+            with IMessageArchive(self.db_path) as archive:
+                contact = archive.contact(contact_id)
+        if contact:
+            profile["contact"] = contact
+            profile["display_name"] = str(
+                contact.get("full_name") or profile.get("display_name") or "Me"
+            )
+            profile["avatar_data_uri"] = str(
+                contact.get("photo_data_uri") or self._profile_vcard_avatar(profile)
+            )
+        else:
+            profile["display_name"] = str(profile.get("display_name") or "Me")
+            profile["avatar_data_uri"] = self._profile_vcard_avatar(profile)
         return profile
 
     def update_operator_profile(self, fields: JSON) -> JSON:

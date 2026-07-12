@@ -217,6 +217,30 @@ def test_web_profile_and_preferences_persist_locally(tmp_path: Path) -> None:
     assert preferences["preferences"]["relationship_types"] == ["friend", "family"]
 
 
+def test_web_profile_uses_configured_synced_contact_card(tmp_path: Path) -> None:
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.replace_contacts(
+            contacts_from_json(
+                [
+                    {
+                        "id": "operator-contact",
+                        "fullName": "Debbie Example",
+                        "organization": {"name": "Example Studio"},
+                        "photo": "aGVsbG8=",
+                    }
+                ]
+            )
+        )
+
+    profile = _service(tmp_path).update_operator_profile(
+        {"display_name": "Fallback", "contact_id": "operator-contact"}
+    )["operator"]
+
+    assert profile["display_name"] == "Debbie Example"
+    assert profile["contact"]["organization_name"] == "Example Studio"
+    assert profile["avatar_data_uri"] == "data:image/jpeg;base64,aGVsbG8="
+
+
 def test_web_contact_review_stays_local_and_can_prepare_a_vcard(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
 

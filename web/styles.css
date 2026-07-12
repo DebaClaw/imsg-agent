@@ -686,6 +686,12 @@ body.chat-selected .detail {
   padding: 22px;
 }
 
+.chat-detail {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+}
+
 .empty-state {
   min-height: 100%;
   display: grid;
@@ -697,6 +703,70 @@ body.chat-selected .detail {
   position: relative;
   padding-bottom: 16px;
   border-bottom: 1px solid rgba(248, 244, 236, 0.18);
+}
+
+.chat-panel-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 14px;
+  padding: 4px;
+  border: 1px solid rgba(248, 244, 236, 0.2);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.chat-panel-switch button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(248, 244, 236, 0.68);
+  font-weight: 850;
+}
+
+.chat-panel-switch button.active {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.chat-workspace {
+  position: relative;
+  display: grid;
+  min-height: 460px;
+  flex: 1 1 auto;
+  margin-top: 14px;
+  overflow: hidden;
+}
+
+.chat-pane {
+  grid-area: 1 / 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease;
+}
+
+.context-pane {
+  transform: translateY(0);
+}
+
+.messages-pane {
+  transform: translateY(108%);
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.chat-workspace[data-panel="messages"] .context-pane {
+  transform: translateY(-108%);
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.chat-workspace[data-panel="messages"] .messages-pane {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .close-workbench {
@@ -774,6 +844,30 @@ body.chat-selected .detail {
 .contact-points {
   display: grid;
   gap: 10px;
+}
+
+.operator-contact-card {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(248, 244, 236, 0.22);
+  border-radius: 8px;
+  background: rgba(248, 244, 236, 0.06);
+  color: rgba(248, 244, 236, 0.75);
+}
+
+.operator-contact-card strong,
+.operator-contact-card span {
+  display: block;
+}
+
+.operator-contact-card span {
+  margin-top: 2px;
+  color: rgba(248, 244, 236, 0.6);
+  font-size: 12px;
 }
 
 .contact-row-title {
@@ -938,13 +1032,15 @@ button:disabled {
   gap: 5px;
   max-width: min(88%, 34rem);
   padding: 11px 12px;
-  border-radius: 8px;
-  background: rgba(248, 244, 236, 0.09);
+  border-radius: 18px 18px 18px 5px;
+  background: rgba(248, 244, 236, 0.13);
   line-height: 1.36;
 }
 
 .message-row.mine .message-bubble {
-  background: rgba(48, 95, 189, 0.38);
+  border-radius: 18px 18px 5px 18px;
+  background: #1778e8;
+  color: #fff;
 }
 
 .message-bubble .time {

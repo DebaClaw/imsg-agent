@@ -3,6 +3,7 @@ const state = {
   activeView: "overview",
   selectedRow: null,
   selectedChat: null,
+  chatPanel: "messages",
   orbit: null,
   operator: null,
   preferences: null,
@@ -146,8 +147,8 @@ function renderOrbit(rows, operator = {}) {
     core.append(image);
   }
   core.append(el("strong", "", text(operator.display_name, "Me")));
-  core.append(el("span", "", "operator"));
-  core.addEventListener("click", () => openOperatorProfile());
+  core.append(el("span", "", text(operator.contact?.organization_name, "operator")));
+  core.addEventListener("click", () => openOperatorProfile().catch((error) => showError(error.message)));
   orbit.append(svg, core, zap);
   if (!rows.length) {
     orbit.append(el("p", "empty-state", "No inbound signals need attention."));
@@ -756,7 +757,9 @@ function safeJsonArray(value) {
 }
 
 async function openChat(row) {
+  const sameChat = Number(state.selectedRow?.chat_id) === Number(row.chat_id);
   state.selectedRow = row;
+  if (!sameChat) state.chatPanel = "context";
   const chatId = row.chat_id;
   if (!chatId) return;
   document.body.classList.add("chat-selected");
@@ -788,6 +791,7 @@ function closeWorkbench() {
   document.body.classList.remove("chat-selected");
   state.selectedRow = null;
   state.selectedChat = null;
+  state.chatPanel = "messages";
   const pane = document.getElementById("detailPane");
   pane.replaceChildren();
   const box = el("div", "empty-state");
@@ -815,19 +819,33 @@ function renderChat(payload, row) {
   head.append(el("p", "eyebrow", `chat ${text(row.chat_id)}`));
   head.append(el("h2", "", nameOf(row)));
   head.append(el("p", "", snippet(row.last_text || "", 180)));
+  const panelSwitch = el("div", "chat-panel-switch");
+  [["context", "Context"], ["messages", "Messages"]].forEach(([panel, label]) => {
+    const button = el("button", "", label);
+    button.type = "button";
+    button.classList.toggle("active", state.chatPanel === panel);
+    button.addEventListener("click", () => switchChatPanel(panel));
+    panelSwitch.append(button);
+  });
+  head.append(panelSwitch);
   wrap.append(head);
-  wrap.append(renderContactBox(payload, row));
-  wrap.append(renderContextBox(payload, row));
+
+  const workspace = el("div", "chat-workspace");
+  workspace.dataset.panel = state.chatPanel;
+  const contextPane = el("section", "chat-pane context-pane");
+  contextPane.append(renderContactBox(payload, row), renderContextBox(payload, row));
+  const messagesPane = el("section", "chat-pane messages-pane");
+  workspace.append(contextPane, messagesPane);
 
   if (row.draft_uuid && row.proposed_text && row.draft_status !== "outbox" && row.draft_status !== "sent") {
-    wrap.append(renderDraftBox(row));
+    messagesPane.append(renderDraftBox(row));
   } else if (row.draft_status === "missing" && row.message_rowid) {
-    wrap.append(renderMissingDraftBox(row));
+    messagesPane.append(renderMissingDraftBox(row));
   } else if (row.draft_status) {
     const statusBox = el("div", "draft-box");
     statusBox.append(el("p", "eyebrow", "reply state"));
     statusBox.append(el("p", "", `This item is currently ${row.draft_status}.`));
-    wrap.append(statusBox);
+    messagesPane.append(statusBox);
   }
 
   const timeline = el("div", "timeline");
@@ -846,8 +864,15 @@ function renderChat(payload, row) {
     rowNode.append(bubble);
     timeline.append(rowNode);
   });
-  wrap.append(timeline);
+  messagesPane.append(timeline);
+  wrap.append(workspace);
   pane.append(wrap);
+}
+
+function switchChatPanel(panel) {
+  if (!state.selectedChat || !state.selectedRow || !["context", "messages"].includes(panel)) return;
+  state.chatPanel = panel;
+  renderChat(state.selectedChat, state.selectedRow);
 }
 
 async function loadOlderMessages(row, payload) {
@@ -981,6 +1006,7 @@ function renderContextBox(payload, row) {
         notes: notes.input.value,
       }),
     });
+    state.chatPanel = "messages";
     await openChat(state.selectedRow);
   }));
   box.append(save);
@@ -1121,16 +1147,56 @@ async function refreshAfterMutation(message) {
   pane.append(box);
 }
 
-function openOperatorProfile() {
+async function openOperatorProfile() {
   document.body.classList.add("chat-selected");
   const pane = document.getElementById("detailPane");
   pane.replaceChildren();
+  const loading = el("div", "empty-state");
+  loading.append(el("p", "eyebrow", "operator identity"), el("h2", "", "Orbit center"));
+  loading.append(el("p", "", "Loading synced contact cards."));
+  pane.append(loading);
+  const contacts = await api("/api/contacts?limit=100");
   const wrap = el("div", "chat-detail");
   const profile = state.operator || {};
   wrap.append(el("p", "eyebrow", "operator identity"));
   wrap.append(el("h2", "", "Orbit center"));
-  const name = input("Display name", text(profile.display_name, "Me"));
-  const vcard = input("vCard path", text(profile.vcard_path));
+  const contactLabel = el("label", "field", "Primary contact card");
+  const contact = document.createElement("select");
+  contact.className = "contact-select";
+  contact.append(new Option("Use a fallback identity", ""));
+  contacts.forEach((entry) => {
+    const organization = text(entry.organization_name);
+    contact.append(new Option(
+      organization ? `${text(entry.full_name, entry.contact_id)} - ${organization}` : text(entry.full_name, entry.contact_id),
+      entry.contact_id,
+    ));
+  });
+  contact.value = text(profile.contact_id);
+  contactLabel.append(contact);
+  const card = el("div", "operator-contact-card");
+  const renderCard = () => {
+    card.replaceChildren();
+    const selected = contacts.find((entry) => entry.contact_id === contact.value);
+    if (!selected) {
+      card.append(el("p", "", "Using your fallback name and optional vCard photo."));
+      return;
+    }
+    if (selected.photo_data_uri) {
+      const image = document.createElement("img");
+      image.className = "contact-avatar";
+      image.src = selected.photo_data_uri;
+      image.alt = "";
+      card.append(image);
+    }
+    const copy = el("div", "");
+    copy.append(el("strong", "", text(selected.full_name, selected.contact_id)));
+    if (selected.organization_name) copy.append(el("span", "", selected.organization_name));
+    card.append(copy);
+  };
+  contact.addEventListener("change", renderCard);
+  renderCard();
+  const name = input("Fallback display name", text(profile.display_name, "Me"));
+  const vcard = input("Fallback vCard path", text(profile.vcard_path));
   const aliases = input("Aliases (comma separated)", (profile.aliases || []).join(", "));
   const save = el("button", "inline-action", "Save operator profile");
   save.type = "button";
@@ -1140,13 +1206,14 @@ function openOperatorProfile() {
       body: JSON.stringify({ fields: {
         display_name: name.input.value,
         vcard_path: vcard.input.value,
+        contact_id: contact.value,
         aliases: aliases.input.value.split(",").map((item) => item.trim()).filter(Boolean),
       } }),
     });
     await loadOverview();
     closeWorkbench();
   }));
-  wrap.append(name.label, vcard.label, aliases.label, save);
+  wrap.append(contactLabel, card, name.label, vcard.label, aliases.label, save);
   pane.append(wrap);
 }
 
@@ -1256,7 +1323,7 @@ function initSkinControls() {
 document.getElementById("refreshButton").addEventListener("click", (event) => {
   runAction(event.currentTarget, loadOverview);
 });
-document.getElementById("operatorButton").addEventListener("click", () => openOperatorProfile());
+document.getElementById("operatorButton").addEventListener("click", () => openOperatorProfile().catch((error) => showError(error.message)));
 document.getElementById("preferencesButton").addEventListener("click", () => openPreferences());
 document.getElementById("opsRefreshButton").addEventListener("click", (event) => {
   runAction(event.currentTarget, loadOps);

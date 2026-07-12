@@ -246,6 +246,15 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Detect SQLite/data-artifact changes and refresh the active view without user action
   - ✅ Keep Refresh as an explicit reconciliation action rather than initial-load plumbing
 
+#### Selected Orbit Workspace
+- ✅ **Context and conversation pane**
+  - ✅ Return an empty-space Orbit click to the default operator-and-queue view
+  - ✅ Put relationship context and the transcript in one switchable right-hand pane
+  - ✅ Move to messages after saving context and retain iMessage-style inbound/outbound alignment
+- ✅ **Primary contact card**
+  - ✅ Choose a synced contact card as the configurable Orbit center
+  - ✅ Use that card's name and photo in Orbit, with the existing vCard fallback
+
 #### AI Action Layer
 - ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor
 - ✅ `scripts/install_agent_worker_launchd.sh` — install worker as separate LaunchAgent
