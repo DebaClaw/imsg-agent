@@ -287,6 +287,8 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ✅ **Service admin scripts**
   - ✅ Add consistent start, stop, restart, status, and log controls for monitor, worker, and web
   - ✅ Document the macOS launchctl restart path and script entrypoints
+- ✅ **LaunchAgent restart reliability**
+  - ✅ Restart loaded services with kickstart and allow enough time for macOS teardown
 
 #### AI Action Layer
 - ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor

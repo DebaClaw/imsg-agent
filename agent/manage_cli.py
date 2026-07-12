@@ -384,8 +384,12 @@ def service_restart(service: str) -> None:
     plist = plist_path(label)
     if not plist.exists():
         raise SystemExit(f"plist not found: {plist}")
-    _run_launchctl(["bootout", f"gui/{os.getuid()}", str(plist)])
-    service_start(service)
+    domain = f"gui/{os.getuid()}"
+    if not bool(service_status(service)["loaded"]):
+        service_start(service)
+        return
+    _launchctl_or_raise(["kickstart", "-k", f"{domain}/{label}"], timeout=30)
+    print(f"restarted {service} ({label})")
 
 
 def service_label(service: str) -> str:
@@ -481,21 +485,21 @@ def _reply_artifact_for_source(
     return None
 
 
-def _run_launchctl(args: list[str]) -> subprocess.CompletedProcess[str]:
+def _run_launchctl(args: list[str], *, timeout: float = 5) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
             ["launchctl", *args],
             check=False,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=timeout,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         return subprocess.CompletedProcess(["launchctl", *args], 1, "", str(exc))
 
 
-def _launchctl_or_raise(args: list[str]) -> None:
-    result = _run_launchctl(args)
+def _launchctl_or_raise(args: list[str], *, timeout: float = 5) -> None:
+    result = _run_launchctl(args, timeout=timeout)
     if result.returncode != 0:
         message = (result.stderr or result.stdout or "launchctl failed").strip()
         raise SystemExit(message)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,7 +9,15 @@ import pytest
 
 from agent.archive_store import IMessageArchive
 from agent.drafter import DraftResponse
-from agent.manage_cli import _parser, log_path, run_draft, run_logs, run_pending, service_status
+from agent.manage_cli import (
+    _parser,
+    log_path,
+    run_draft,
+    run_logs,
+    run_pending,
+    service_restart,
+    service_status,
+)
 from agent.models import Chat, Draft, Message
 from agent.store import MessageStore
 
@@ -202,6 +211,32 @@ def test_service_status_parses_launchctl_running(monkeypatch: pytest.MonkeyPatch
     assert status["loaded"] is True
     assert status["running"] is True
     assert status["detail"] == "running"
+
+
+def test_service_restart_kickstarts_loaded_launchagent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("agent.manage_cli.plist_path", lambda _label: tmp_path / "worker.plist")
+    (tmp_path / "worker.plist").touch()
+    monkeypatch.setattr(
+        "agent.manage_cli.service_status",
+        lambda _service: {"loaded": True},
+    )
+    captured: dict[str, object] = {}
+
+    def fake_launchctl(args: list[str], *, timeout: float = 5) -> None:
+        captured["args"] = args
+        captured["timeout"] = timeout
+
+    monkeypatch.setattr("agent.manage_cli._launchctl_or_raise", fake_launchctl)
+
+    service_restart("worker")
+
+    assert captured["args"] == ["kickstart", "-k", f"gui/{os.getuid()}/com.imsg-agent.worker"]
+    assert captured["timeout"] == 30
+    assert "restarted worker" in capsys.readouterr().out
 
 
 def test_log_path_selects_service_files(tmp_path: Path) -> None:
