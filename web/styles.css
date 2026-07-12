@@ -732,7 +732,6 @@ body.chat-selected .detail {
 
 .chat-workspace {
   position: relative;
-  display: grid;
   min-height: 460px;
   flex: 1 1 auto;
   margin-top: 14px;
@@ -740,10 +739,13 @@ body.chat-selected .detail {
 }
 
 .chat-pane {
-  grid-area: 1 / 1;
+  position: absolute;
+  inset: 0;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding-right: 4px;
+  scrollbar-gutter: stable;
   transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease;
 }
 
@@ -767,6 +769,27 @@ body.chat-selected .detail {
   transform: translateY(0);
   opacity: 1;
   pointer-events: auto;
+}
+
+@media (min-width: 1101px) {
+  body.chat-selected .detail {
+    display: flex;
+    overflow: hidden;
+  }
+
+  .chat-detail {
+    height: 100%;
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  .chat-head {
+    flex: 0 0 auto;
+  }
+
+  .chat-workspace {
+    min-height: 0;
+  }
 }
 
 .close-workbench {

@@ -251,6 +251,8 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Return an empty-space Orbit click to the default operator-and-queue view
   - ✅ Put relationship context and the transcript in one switchable right-hand pane
   - ✅ Move to messages after saving context and retain iMessage-style inbound/outbound alignment
+- ✅ **Scrollable selected pane**
+  - ✅ Constrain the desktop workbench and scroll context or messages independently
 - ✅ **Primary contact card**
   - ✅ Choose a synced contact card as the configurable Orbit center
   - ✅ Use that card's name and photo in Orbit, with the existing vCard fallback
