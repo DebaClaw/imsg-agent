@@ -1238,13 +1238,17 @@ async function renderSettings() {
   const name = input("Name", text(identity.name, text(profile.name, "Me")));
   const aliases = input("My addresses and handles (comma separated)", (identity.aliases || profile.aliases || []).join(", "));
   const vcard = input("vCard photo fallback", text(profile.vcard_path));
-  const filter = input("Find my contact card", "");
+  const picker = el("div", "contact-picker");
+  const filter = input("Filter contact cards", "");
+  filter.input.placeholder = "Type any part of a name or organization";
   const contact = document.createElement("select");
   contact.className = "contact-select";
-  const contactLabel = el("label", "field", "My contact card");
+  contact.size = 8;
+  const contactLabel = el("label", "field", "Matching contact cards");
   contactLabel.append(contact);
   const card = el("div", "operator-contact-card");
   const pickerPager = el("div", "");
+  const pickerStatus = el("p", "picker-status");
   let selectedContactId = text(profile.contact_id);
   let contactPage = { items: [] };
   let filterTimer = 0;
@@ -1286,6 +1290,9 @@ async function renderSettings() {
     }
     contact.value = selectedContactId;
     pickerPager.replaceChildren(renderPagination(contactPage, loadContactPicker));
+    pickerStatus.textContent = contactPage.total
+      ? `${contactPage.total} matching contact cards`
+      : "No contact cards match this filter.";
     renderCard();
   };
 
@@ -1312,7 +1319,8 @@ async function renderSettings() {
     await loadOverview();
     await renderSettings();
   }));
-  identitySection.append(name.label, aliases.label, vcard.label, filter.label, contactLabel, pickerPager, card, saveIdentity);
+  picker.append(filter.label, contactLabel, pickerPager, pickerStatus);
+  identitySection.append(name.label, aliases.label, vcard.label, picker, card, saveIdentity);
 
   const queueSection = el("section", "settings-section");
   queueSection.append(el("p", "eyebrow", "queue rules"), el("h2", "", "Pending drafts"));

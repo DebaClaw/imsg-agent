@@ -967,6 +967,24 @@ body.chat-selected .detail {
   color: rgba(248, 244, 236, 0.75);
 }
 
+.contact-picker {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.contact-picker .contact-select {
+  min-height: 220px;
+  margin-top: 10px;
+}
+
+.picker-status {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
 .operator-contact-card strong,
 .operator-contact-card span {
   display: block;
