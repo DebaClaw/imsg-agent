@@ -24,6 +24,7 @@ from .contact_enrichment import (
     contacts_from_json,
     contacts_mcp_tool,
     load_contacts_from_contacts_mcp,
+    normalize_identifier,
 )
 from .drafter import Drafter, OpenAIResponsesDraftingClient
 from .manage_cli import (
@@ -115,24 +116,29 @@ class OperatorService:
                 contact = archive.contact(contact_id)
         if contact:
             profile["contact"] = contact
-            profile["display_name"] = str(
-                contact.get("full_name") or profile.get("display_name") or "Me"
-            )
+            profile["display_name"] = str(contact.get("full_name") or self._operator_name(profile))
             profile["avatar_data_uri"] = str(
                 contact.get("photo_data_uri") or self._profile_vcard_avatar(profile)
             )
         else:
-            profile["display_name"] = str(profile.get("display_name") or "Me")
+            profile["display_name"] = self._operator_name(profile)
             profile["avatar_data_uri"] = self._profile_vcard_avatar(profile)
+        profile["identity"] = {
+            "name": self._operator_name(profile),
+            "contact_id": contact_id,
+            "aliases": self._string_list(profile.get("aliases")),
+        }
         return profile
 
     def update_operator_profile(self, fields: JSON) -> JSON:
         store = MessageStore(self.data_dir)
         profile = store.read_operator_profile()
-        allowed = {"display_name", "vcard_path", "contact_id", "aliases", "avatar_data_uri"}
+        allowed = {"name", "display_name", "vcard_path", "contact_id", "aliases", "avatar_data_uri"}
         for key, value in fields.items():
             if key in allowed:
                 profile[key] = value
+                if key == "display_name":
+                    profile["name"] = value
         store.write_operator_profile(profile)
         return {"status": "saved", "operator": self.operator_profile()}
 
@@ -247,8 +253,10 @@ class OperatorService:
         store = MessageStore(self.data_dir)
         context, notes = store.read_chat_context_document(chat_id)
         review, review_notes = store.read_contact_review(chat_id)
+        recipients = self._recipient_participants(seed.get("participants") or [])
         return {
             "chat": seed,
+            "recipients": recipients,
             "context": context,
             "notes": notes,
             "messages": messages,
@@ -392,22 +400,66 @@ class OperatorService:
             "participants",
         }
         updated = dict(current)
+        recipients = self._recipient_participants(seed.get("participants") or [])
         if seed:
             updated.setdefault("name", seed.get("name") or f"chat {chat_id}")
             updated.setdefault("identifier", seed.get("identifier") or "")
             updated.setdefault("service", seed.get("service") or "")
-            updated.setdefault("participants", seed.get("participants") or [])
+            updated.setdefault("participants", recipients)
             updated.setdefault("is_group", bool(seed.get("is_group")))
             if seed.get("last_message_at"):
                 updated.setdefault("last_active", seed.get("last_message_at"))
         for key, value in fields.items():
             if key in allowed:
-                updated[key] = value
+                updated[key] = (
+                    self._recipient_participants(value)
+                    if key == "participants" and isinstance(value, list)
+                    else value
+                )
         updated.setdefault("chat_id", chat_id)
         updated["notes"] = current_notes if notes is None else notes
         store.write_chat_context(chat_id, updated)
         context, body = store.read_chat_context_document(chat_id)
         return {"status": "saved", "chat_id": chat_id, "context": context, "notes": body}
+
+    @staticmethod
+    def _string_list(value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    @staticmethod
+    def _operator_name(profile: JSON) -> str:
+        return str(profile.get("name") or profile.get("display_name") or "Me")
+
+    @staticmethod
+    def _participant_key(value: object) -> str:
+        raw = str(value or "").strip()
+        normalized = normalize_identifier(raw)
+        if normalized is not None:
+            return ":".join(normalized)
+        return raw.lower()
+
+    def _recipient_participants(self, participants: object) -> list[str]:
+        values = self._string_list(participants)
+        profile = self.operator_profile()
+        operator_values = [
+            "Me",
+            str(profile.get("display_name") or ""),
+            *self._string_list(profile.get("aliases")),
+        ]
+        contact = profile.get("contact")
+        if isinstance(contact, dict):
+            operator_values.append(str(contact.get("full_name") or ""))
+            points = contact.get("points")
+            if isinstance(points, list):
+                for point in points:
+                    if isinstance(point, dict):
+                        operator_values.extend(
+                            [str(point.get("value") or ""), str(point.get("original_value") or "")]
+                        )
+        operator_keys = {self._participant_key(value) for value in operator_values if value}
+        return [value for value in values if self._participant_key(value) not in operator_keys]
 
     def approve_draft(self, uuid: str, *, text: str | None = None) -> JSON:
         store = MessageStore(self.data_dir)

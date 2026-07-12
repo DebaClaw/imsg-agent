@@ -241,6 +241,42 @@ def test_web_profile_uses_configured_synced_contact_card(tmp_path: Path) -> None
     assert profile["avatar_data_uri"] == "data:image/jpeg;base64,aGVsbG8="
 
 
+def test_web_operator_identity_excludes_me_from_context_recipients(tmp_path: Path) -> None:
+    own_number = "+18015550100"
+    recipient = "+18015550101"
+    chat = _chat()
+    chat.participants = [own_number, recipient, "Me"]
+    message = _message()
+    message.participants = [own_number, recipient, "Me"]
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.upsert_chat(chat)
+        archive.upsert_message(message)
+        archive.replace_contacts(
+            contacts_from_json(
+                [
+                    {
+                        "id": "operator-contact",
+                        "fullName": "Debbie",
+                        "phones": [{"value": own_number}],
+                    }
+                ]
+            )
+        )
+
+    service = _service(tmp_path)
+    profile = service.update_operator_profile(
+        {"name": "Debbie", "contact_id": "operator-contact", "aliases": [own_number]}
+    )["operator"]
+    chat_payload = service.chat(7)
+    service.update_chat_context(7, fields={"participants": [own_number, recipient, "Me"]})
+    context = MessageStore(tmp_path).read_chat_context(7)
+
+    assert profile["identity"]["name"] == "Debbie"
+    assert profile["identity"]["contact_id"] == "operator-contact"
+    assert chat_payload["recipients"] == [recipient]
+    assert context["participants"] == [recipient]
+
+
 def test_web_contact_review_stays_local_and_can_prepare_a_vcard(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
 

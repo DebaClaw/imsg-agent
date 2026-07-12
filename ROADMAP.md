@@ -256,6 +256,9 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ✅ **Primary contact card**
   - ✅ Choose a synced contact card as the configurable Orbit center
   - ✅ Use that card's name and photo in Orbit, with the existing vCard fallback
+- ✅ **Operator identity and recipients**
+  - ✅ Make the operator name and linked contact a first-class local identity configuration
+  - ✅ Exclude the configured operator from Context recipient lists and saved participants
 
 #### Contact Safety Controls
 - ✅ **Ignore and spam policy**

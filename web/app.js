@@ -975,7 +975,7 @@ function renderContextBox(payload, row) {
   const relationship = input("Relationship", context.relationship || "");
   const tone = input("Tone", context.tone || "");
   const name = input("Conversation name", context.name || text(payload.chat && payload.chat.name));
-  const participants = input("Participants (comma separated)", (context.participants || payload.chat?.participants || []).join(", "));
+  const participants = input("Recipients (me excluded)", (payload.recipients || context.participants || []).join(", "));
   const model = input("Draft model", context.model || "");
   const agentNotes = textarea("Agent notes", context.agent_notes || "", "short-textarea");
   const professional = checkbox("Professional", Boolean(context.professional));
@@ -1162,9 +1162,10 @@ async function openOperatorProfile() {
   const contacts = await api("/api/contacts?limit=100");
   const wrap = el("div", "chat-detail");
   const profile = state.operator || {};
+  const identity = profile.identity || {};
   wrap.append(el("p", "eyebrow", "operator identity"));
   wrap.append(el("h2", "", "Orbit center"));
-  const contactLabel = el("label", "field", "Primary contact card");
+  const contactLabel = el("label", "field", "My contact card");
   const contact = document.createElement("select");
   contact.className = "contact-select";
   contact.append(new Option("Use a fallback identity", ""));
@@ -1199,16 +1200,16 @@ async function openOperatorProfile() {
   };
   contact.addEventListener("change", renderCard);
   renderCard();
-  const name = input("Fallback display name", text(profile.display_name, "Me"));
-  const vcard = input("Fallback vCard path", text(profile.vcard_path));
-  const aliases = input("Aliases (comma separated)", (profile.aliases || []).join(", "));
+  const name = input("Who am I?", text(identity.name, text(profile.name, "Me")));
+  const vcard = input("vCard photo fallback", text(profile.vcard_path));
+  const aliases = input("My addresses and handles (comma separated)", (identity.aliases || profile.aliases || []).join(", "));
   const save = el("button", "inline-action", "Save operator profile");
   save.type = "button";
   save.addEventListener("click", () => runAction(save, async () => {
     await api("/api/operator", {
       method: "POST",
       body: JSON.stringify({ fields: {
-        display_name: name.input.value,
+        name: name.input.value,
         vcard_path: vcard.input.value,
         contact_id: contact.value,
         aliases: aliases.input.value.split(",").map((item) => item.trim()).filter(Boolean),

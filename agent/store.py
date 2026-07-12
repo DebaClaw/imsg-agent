@@ -121,6 +121,7 @@ class MessageStore:
     def read_operator_profile(self) -> dict[str, Any]:
         """Read the local operator identity without contacting Contacts."""
         defaults: dict[str, Any] = {
+            "name": "",
             "display_name": "Me",
             "vcard_path": "",
             "contact_id": "",
