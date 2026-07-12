@@ -14,7 +14,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from .archive_agent import ArchiveAgentWorker
@@ -88,6 +88,34 @@ class OperatorService:
                 "preferences": self.observatory_preferences(),
                 "revision": self._data_revision(),
             }
+
+    def orbit(
+        self,
+        *,
+        limit: int = 16,
+        offset: int = 0,
+        direction: str = "incoming",
+        days: int = 7,
+    ) -> JSON:
+        if limit < 1 or limit > 32:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "limit must be 1 to 32")
+        if offset < 0:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "offset must not be negative")
+        if direction not in {"incoming", "outgoing", "either"}:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "Unknown Orbit direction")
+        if days not in {0, 1, 7, 30, 90}:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "days must be 0, 1, 7, 30, or 90")
+        since = (datetime.now(UTC) - timedelta(days=days)).isoformat() if days else None
+        with IMessageArchive(self.db_path) as archive:
+            page = archive.orbit_threads(
+                limit=limit,
+                offset=offset,
+                direction=direction,
+                since=since,
+            )
+        store = MessageStore(self.data_dir)
+        items = self._orbit_rows(cast(JSONList, page["items"]), [], store, limit=limit)
+        return {**page, "items": items, "direction": direction, "days": days}
 
     def pending(
         self,
@@ -268,8 +296,10 @@ class OperatorService:
         }
 
     def contacts(self, *, limit: int = 50, query: str = "") -> JSONList:
+        importance = MessageStore(self.data_dir).read_contact_importance()
         with IMessageArchive(self.db_path) as archive:
-            return archive.contacts(limit=limit, query=query)
+            rows = archive.contacts(limit=limit, query=query)
+        return [{**row, "importance": importance.get(str(row["contact_id"]), 0)} for row in rows]
 
     def contacts_page(self, *, limit: int = 50, offset: int = 0, query: str = "") -> JSON:
         if limit < 1 or limit > 100:
@@ -277,14 +307,35 @@ class OperatorService:
         if offset < 0:
             raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "offset must not be negative")
         with IMessageArchive(self.db_path) as archive:
-            return archive.contacts_page(limit=limit, offset=offset, query=query)
+            page = archive.contacts_page(limit=limit, offset=offset, query=query)
+        importance = MessageStore(self.data_dir).read_contact_importance()
+        page_items = cast(JSONList, page["items"])
+        items = [
+            {**row, "importance": importance.get(str(row["contact_id"]), 0)}
+            for row in page_items
+        ]
+        return {**page, "items": items}
 
     def contact(self, contact_id: str) -> JSON:
         with IMessageArchive(self.db_path) as archive:
             detail = archive.contact(contact_id)
         if not detail:
             raise OperatorServiceError(HTTPStatus.NOT_FOUND, "Contact not found")
+        importance = MessageStore(self.data_dir).read_contact_importance()
+        detail["importance"] = importance.get(contact_id, 0)
         return detail
+
+    def update_contact_importance(self, contact_id: str, importance: int) -> JSON:
+        if importance < 0 or importance > 5:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "importance must be 0 to 5")
+        with IMessageArchive(self.db_path) as archive:
+            if not archive.contact(contact_id):
+                raise OperatorServiceError(HTTPStatus.NOT_FOUND, "Contact not found")
+        store = MessageStore(self.data_dir)
+        values = store.read_contact_importance()
+        values[contact_id] = importance
+        store.write_contact_importance(values)
+        return {"status": "saved", "contact_id": contact_id, "importance": importance}
 
     def sync_contacts(self) -> JSON:
         try:
@@ -772,19 +823,35 @@ class OperatorService:
             if bool(context.get("favorite")) and chat_id not in orbit_by_chat:
                 orbit_by_chat[chat_id] = dict(row)
         orbit: JSONList = []
+        importance = store.read_contact_importance()
         for row in orbit_by_chat.values():
             context = store.read_chat_context(int(str(row["chat_id"])))
             row = dict(row)
             row["favorite"] = bool(context.get("favorite"))
             row["relationship"] = str(context.get("relationship") or "unclassified")
             row["relationship_priority"] = self._relationship_priority(row["relationship"])
+            contact_ids = [item for item in str(row.get("contact_ids") or "").split(",") if item]
+            row["importance"] = max(
+                (importance.get(contact_id, 0) for contact_id in contact_ids), default=0
+            )
+            inbound = int(str(row.get("inbound_90d") or 0))
+            outbound = int(str(row.get("outbound_90d") or 0))
+            row["two_way_score"] = min(5, min(inbound, outbound)) if contact_ids else 0
+            row["orbit_score"] = (
+                int(str(row.get("score") or 0))
+                + int(str(row["importance"])) * 12
+                + int(str(row["two_way_score"])) * 4
+                + int(str(row["relationship_priority"])) * 3
+                + (20 if bool(row["favorite"]) else 0)
+            )
+            if row["two_way_score"]:
+                row["reason"] = f"{str(row.get('reason') or '')}; two-way discussion".strip("; ")
             orbit.append(row)
         orbit.sort(
             key=lambda row: (
                 bool(row["favorite"]),
-                int(str(row["relationship_priority"])),
+                int(str(row["orbit_score"])),
                 str(row.get("last_message_at") or ""),
-                int(str(row.get("score") or 0)),
             ),
             reverse=True,
         )

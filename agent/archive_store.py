@@ -11,7 +11,7 @@ import re
 import shutil
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -839,6 +839,100 @@ class IMessageArchive:
             )
         )
         return items[:limit]
+
+    def orbit_threads(
+        self,
+        *,
+        limit: int = 16,
+        offset: int = 0,
+        direction: str = "incoming",
+        since: str | None = None,
+    ) -> ArchiveRow:
+        if direction not in {"incoming", "outgoing", "either"}:
+            raise ValueError("Unknown Orbit direction")
+        where = ["latest.rank = 1", "latest.is_reaction = 0"]
+        params: list[object] = []
+        if direction == "incoming":
+            where.append("latest.is_from_me = 0")
+        elif direction == "outgoing":
+            where.append("latest.is_from_me = 1")
+        if since:
+            where.append("latest.date >= ?")
+            params.append(since)
+        base = "FROM latest JOIN chats c ON c.id = latest.chat_id WHERE " + " AND ".join(where)
+        latest_cte = """
+            WITH latest AS (
+                SELECT m.*, ROW_NUMBER() OVER (
+                    PARTITION BY m.chat_id ORDER BY m.date DESC, m.rowid DESC
+                ) AS rank
+                FROM messages m
+            )
+        """
+        total = int(self._db.execute(f"{latest_cte} SELECT COUNT(*) {base}", params).fetchone()[0])
+        cutoff = _fmt_dt(datetime.now(UTC) - timedelta(days=90))
+        rows = self._db.execute(
+            latest_cte
+            + """
+            SELECT
+                c.id AS chat_id,
+                c.name AS name,
+                c.identifier AS identifier,
+                c.is_group AS is_group,
+                latest.rowid AS message_rowid,
+                latest.sender AS sender,
+                latest.date AS last_message_at,
+                latest.text AS last_text,
+                latest.is_from_me AS latest_is_from_me,
+                latest.has_attachments AS has_attachments,
+                (SELECT COUNT(*) FROM messages counted WHERE counted.chat_id = c.id) AS messages,
+                (SELECT COUNT(*) FROM messages inbound WHERE inbound.chat_id = c.id
+                    AND inbound.date >= ? AND inbound.is_from_me = 0) AS inbound_90d,
+                (SELECT COUNT(*) FROM messages outbound WHERE outbound.chat_id = c.id
+                    AND outbound.date >= ? AND outbound.is_from_me = 1) AS outbound_90d,
+                (
+                    SELECT GROUP_CONCAT(full_name, ', ') FROM (
+                        SELECT DISTINCT contacts.full_name AS full_name
+                        FROM chat_contact_matches matches
+                        JOIN contacts ON contacts.contact_id = matches.contact_id
+                        WHERE matches.chat_id = c.id AND matches.status = 'matched'
+                            AND contacts.full_name != ''
+                        ORDER BY contacts.full_name
+                    )
+                ) AS contacts,
+                (
+                    SELECT GROUP_CONCAT(contact_id, ',') FROM (
+                        SELECT contact_id FROM chat_contact_matches
+                        WHERE chat_id = c.id AND status = 'matched'
+                        UNION
+                        SELECT contact_id FROM manual_contact_links
+                        WHERE chat_id = c.id
+                        ORDER BY contact_id
+                    )
+                ) AS contact_ids
+            """
+            + base
+            + " ORDER BY latest.date DESC, latest.rowid DESC LIMIT ? OFFSET ?",
+            [cutoff, cutoff, *params, limit, offset],
+        ).fetchall()
+        items: list[ArchiveRow] = []
+        now = datetime.now(UTC)
+        for source in rows:
+            row = self._row_to_dict(source)
+            if bool(row.get("latest_is_from_me")):
+                row["score"] = 0
+                row["hours_waiting"] = round(_hours_since(str(row["last_message_at"]), now=now), 2)
+                row["reason"] = "latest message is outbound"
+            else:
+                row = self._score_attention_item(row, now=now)
+            items.append(row)
+        next_offset = offset + len(items)
+        return {
+            "items": items,
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "next_offset": next_offset if next_offset < total else None,
+        }
 
     def needs_reply(self, *, limit: int = 50) -> list[ArchiveRow]:
         rows = self._db.execute(

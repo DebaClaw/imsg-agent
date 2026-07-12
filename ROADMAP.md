@@ -272,6 +272,15 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ✅ **Contact selection at scale**
   - ✅ Add substring filtering and pagination to contact lists and identity-card selection
 
+#### Orbit Relationship Ranking and Exploration
+- ✅ **Relationship-aware Orbit ranking**
+  - ✅ Add a local per-contact importance override
+  - ✅ Score matched contacts with recent two-way discussion activity alongside inbound recency
+  - ✅ Expose ranking factors on Orbit items for review
+- ✅ **Orbit navigation**
+  - ✅ Add incoming/outgoing/either direction and time-window controls
+  - ✅ Page through all matching threads without overcrowding the attention field
+
 #### AI Action Layer
 - ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor
 - ✅ `scripts/install_agent_worker_launchd.sh` — install worker as separate LaunchAgent

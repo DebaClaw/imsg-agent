@@ -68,6 +68,14 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
             return service.status()
         if parts == ["api", "overview"]:
             return service.overview(limit=_query_int(query, "limit", 12))
+        if parts == ["api", "orbit"]:
+            days = _query_optional_int(query, "days")
+            return service.orbit(
+                limit=_query_int(query, "limit", 16),
+                offset=_query_optional_int(query, "offset") or 0,
+                direction=_query_str(query, "direction", "incoming"),
+                days=7 if days is None else days,
+            )
         if parts == ["api", "changes"]:
             return service.changes(since=_query_str(query, "since", ""))
         if parts == ["api", "operator"]:
@@ -190,6 +198,8 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
             return service.create_contact(_payload_dict(payload, "fields"))
         if len(parts) == 4 and parts[:2] == ["api", "contacts"] and parts[3] == "update":
             return service.update_contact(parts[2], _payload_dict(payload, "fields"))
+        if len(parts) == 4 and parts[:2] == ["api", "contacts"] and parts[3] == "importance":
+            return service.update_contact_importance(parts[2], _payload_int(payload, "importance"))
         if len(parts) == 4 and parts[:2] == ["api", "contacts"] and parts[3] == "delete":
             return service.delete_contact(parts[2])
         if len(parts) == 4 and parts[:2] == ["api", "chats"] and parts[3] == "context":

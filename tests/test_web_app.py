@@ -428,6 +428,61 @@ def test_web_overview_prioritizes_favorite_recent_chat(tmp_path: Path) -> None:
     assert _service(tmp_path).changes(since=str(payload["revision"]))["changed"] is False
 
 
+def test_web_orbit_scores_two_way_contacts_and_pages_by_direction(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    earlier = _message(rowid=99)
+    earlier.is_from_me = True
+    earlier.sender = "me"
+    earlier.text = "Thursday works."
+    earlier.date = NOW.replace(hour=10)
+    outgoing_chat = Chat(
+        id=8,
+        identifier="iMessage;-;+18015550102",
+        name="Jordan",
+        service="iMessage",
+        last_message_at=NOW,
+        participants=["+18015550102"],
+    )
+    outgoing = Message(
+        rowid=200,
+        chat_id=8,
+        guid="GUID-200",
+        sender="me",
+        text="Checking in.",
+        date=NOW,
+        is_from_me=True,
+        service="iMessage",
+        has_attachments=False,
+        chat_name="Jordan",
+        participants=["+18015550102"],
+    )
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.upsert_message(earlier)
+        archive.upsert_chat(outgoing_chat)
+        archive.upsert_message(outgoing)
+        archive.replace_contacts(
+            contacts_from_json([{"id": "contact-1", "fullName": "Alex", "phones": []}])
+        )
+        archive.link_chat_contact(7, "contact-1")
+
+    service = _service(tmp_path)
+    service.update_contact_importance("contact-1", 3)
+    incoming = service.orbit(direction="incoming", days=0)
+    outgoing_page = service.orbit(direction="outgoing", days=0)
+    first_page = service.orbit(limit=1, offset=0, direction="either", days=0)
+    second_page = service.orbit(limit=1, offset=1, direction="either", days=0)
+
+    ranked = incoming["items"][0]
+    assert ranked["chat_id"] == 7
+    assert ranked["importance"] == 3
+    assert ranked["two_way_score"] == 1
+    assert ranked["orbit_score"] > ranked["score"]
+    assert [row["chat_id"] for row in outgoing_page["items"]] == [8]
+    assert first_page["total"] == 2
+    assert first_page["next_offset"] == 1
+    assert len(second_page["items"]) == 1
+
+
 def test_web_mark_no_reply_hides_missing_pending_item(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
 

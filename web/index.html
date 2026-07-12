@@ -42,6 +42,18 @@
                 <h2>Who is tugging on the thread?</h2>
               </div>
               <div class="panel-tools">
+                <div class="orbit-direction" aria-label="Orbit direction">
+                  <button class="active" data-orbit-direction="incoming" type="button">In</button>
+                  <button data-orbit-direction="outgoing" type="button">Out</button>
+                  <button data-orbit-direction="either" type="button">Both</button>
+                </div>
+                <select class="orbit-window" id="orbitWindow" aria-label="Orbit time window">
+                  <option value="1">24h</option>
+                  <option value="7" selected>7d</option>
+                  <option value="30">30d</option>
+                  <option value="90">90d</option>
+                  <option value="0">All time</option>
+                </select>
                 <div class="skin-switch" aria-label="Skin">
                   <button class="active" data-skin="light" type="button">Light</button>
                   <button data-skin="dark" type="button">Dark</button>
@@ -53,6 +65,7 @@
               </div>
             </div>
             <div class="orbit" id="orbit" aria-label="Attention orbit"></div>
+            <div class="orbit-pagination" id="orbitPagination"></div>
           </div>
 
           <div class="queue-panel">

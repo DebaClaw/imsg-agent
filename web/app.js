@@ -10,6 +10,10 @@ const state = {
   revision: "",
   contactsQuery: "",
   contactsOffset: 0,
+  orbitDirection: "incoming",
+  orbitDays: 7,
+  orbitOffset: 0,
+  orbitPage: null,
 };
 
 const signalColors = ["--signal-0", "--signal-1", "--signal-2", "--signal-3", "--signal-4"];
@@ -179,7 +183,7 @@ function renderOrbit(rows, operator = {}) {
     node.style.setProperty("--size", `${size}px`);
     node.style.setProperty("--signal-color", `var(${signalColors[index % signalColors.length]})`);
     node.append(el("strong", "", nameOf(row)));
-    node.append(el("span", "", `${text(row.hours_waiting, "?")}h`));
+    node.append(el("span", "", `${text(row.hours_waiting, "?")}h / ${text(row.orbit_score, text(row.score, "0"))}`));
     svg.append(line);
     orbit.append(node);
     const body = {
@@ -598,8 +602,40 @@ async function loadOverview() {
   state.preferences = overview.preferences || {};
   state.revision = text(overview.revision);
   renderStatus(overview.status);
-  renderOrbit(overview.attention || [], state.operator);
   renderPending(overview.pending || [], state.preferences);
+  await loadOrbit();
+}
+
+async function loadOrbit(reset = false) {
+  if (reset) state.orbitOffset = 0;
+  const page = await api(
+    `/api/orbit?limit=16&offset=${state.orbitOffset}&direction=${encodeURIComponent(state.orbitDirection)}&days=${state.orbitDays}`,
+  );
+  state.orbitPage = page;
+  renderOrbit(page.items || [], state.operator || {});
+  renderOrbitPagination(page);
+}
+
+function renderOrbitPagination(page) {
+  const container = document.getElementById("orbitPagination");
+  container.replaceChildren();
+  const previous = el("button", "icon-button", "Previous");
+  previous.type = "button";
+  previous.disabled = Number(page.offset || 0) === 0;
+  previous.addEventListener("click", () => {
+    state.orbitOffset = Math.max(0, Number(page.offset || 0) - Number(page.limit || 16));
+    loadOrbit().catch((error) => showError(error.message));
+  });
+  const next = el("button", "icon-button", "Next");
+  next.type = "button";
+  next.disabled = page.next_offset === null || page.next_offset === undefined;
+  next.addEventListener("click", () => {
+    state.orbitOffset = Number(page.next_offset);
+    loadOrbit().catch((error) => showError(error.message));
+  });
+  const items = page.items || [];
+  const first = items.length ? Number(page.offset || 0) + 1 : 0;
+  container.append(previous, el("span", "", `${first}-${Number(page.offset || 0) + items.length} of ${Number(page.total || 0)}`), next);
 }
 
 async function loadList(view) {
@@ -656,7 +692,7 @@ async function loadContacts(query = state.contactsQuery, offset = 0) {
     title.append(el("h3", "", text(row.full_name, text(row.organization_name, row.contact_id))));
     button.append(title);
     button.append(el("p", "", text(row.organization_name)));
-    button.append(el("p", "meta-line", `${text(row.contact_points, "0")} contact points`));
+    button.append(el("p", "meta-line", `${text(row.contact_points, "0")} points / importance ${text(row.importance, "0")}`));
     button.addEventListener("click", () => openContact(row.contact_id));
     list.append(button);
   });
@@ -698,8 +734,13 @@ async function openContact(contactId) {
   const email = input("Email", contactPoint(contact.points, "email"));
   const phone = input("Phone", contactPoint(contact.points, "phone"));
   const categories = input("Categories (comma separated)", safeJsonArray(contact.categories_json).join(", "));
+  const importance = input("Orbit importance (0 to 5)", text(contact.importance, "0"));
+  importance.input.type = "number";
+  importance.input.min = "0";
+  importance.input.max = "5";
+  importance.input.step = "1";
   const notes = textarea("Notes", text(contact.notes), "short-textarea");
-  panel.append(name.label, organization.label, email.label, phone.label, categories.label, notes.label);
+  panel.append(name.label, organization.label, email.label, phone.label, categories.label, importance.label, notes.label);
   const points = el("div", "contact-points");
   (contact.points || []).forEach((point) => points.append(el("p", "", `${point.kind}: ${point.original_value || point.value}`)));
   panel.append(points);
@@ -712,6 +753,10 @@ async function openContact(contactId) {
     await api(`/api/contacts/${encodeURIComponent(contactId)}/update`, {
       method: "POST",
       body: JSON.stringify({ fields: contactFields(name, organization, email, phone, categories, notes) }),
+    });
+    await api(`/api/contacts/${encodeURIComponent(contactId)}/importance`, {
+      method: "POST",
+      body: JSON.stringify({ importance: Number(importance.input.value) }),
     });
     await openContact(contactId);
   }));
@@ -1377,6 +1422,21 @@ function initSkinControls() {
 
 document.getElementById("refreshButton").addEventListener("click", (event) => {
   runAction(event.currentTarget, loadOverview);
+});
+document.querySelectorAll("[data-orbit-direction]").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.orbitDirection = button.dataset.orbitDirection;
+    state.orbitOffset = 0;
+    document.querySelectorAll("[data-orbit-direction]").forEach((item) => {
+      item.classList.toggle("active", item.dataset.orbitDirection === state.orbitDirection);
+    });
+    loadOrbit().catch((error) => showError(error.message));
+  });
+});
+document.getElementById("orbitWindow").addEventListener("change", (event) => {
+  state.orbitDays = Number(event.currentTarget.value);
+  state.orbitOffset = 0;
+  loadOrbit().catch((error) => showError(error.message));
 });
 document.getElementById("operatorButton").addEventListener("click", () => openOperatorProfile().catch((error) => showError(error.message)));
 document.getElementById("preferencesButton").addEventListener("click", () => openPreferences().catch((error) => showError(error.message)));

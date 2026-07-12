@@ -133,6 +133,29 @@ class MessageStore:
     def write_operator_profile(self, profile: dict[str, Any]) -> None:
         _atomic_write(self._root / "operator.md", _write_frontmatter(profile, ""))
 
+    def read_contact_importance(self) -> dict[str, int]:
+        """Return local 0-5 importance overrides keyed by synced contact ID."""
+        path = self._root / "contact_importance.json"
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            str(contact_id): int(value)
+            for contact_id, value in raw.items()
+            if isinstance(value, int) and 0 <= value <= 5
+        }
+
+    def write_contact_importance(self, values: dict[str, int]) -> None:
+        cleaned = {
+            str(contact_id): int(value)
+            for contact_id, value in values.items()
+            if 0 <= int(value) <= 5
+        }
+        _atomic_write(self._root / "contact_importance.json", json.dumps(cleaned, sort_keys=True))
+
     def read_observatory_preferences(self) -> dict[str, Any]:
         """Return global queue settings; per-chat context remains separate."""
         defaults: dict[str, Any] = {
