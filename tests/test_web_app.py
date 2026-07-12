@@ -257,6 +257,33 @@ def test_web_contact_review_stays_local_and_can_prepare_a_vcard(tmp_path: Path) 
     assert "BEGIN:VCARD" in candidate.read_text(encoding="utf-8")
 
 
+def test_web_ignore_spam_fills_blank_context_and_blocks_drafting(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    MessageStore(tmp_path).write_chat_context(
+        7,
+        {
+            "chat_id": 7,
+            "relationship": "",
+            "tone": "Already documented tone.",
+            "auto_approve": True,
+            "do_not_draft": False,
+            "agent_notes": "",
+            "notes": "",
+        },
+    )
+
+    payload = _service(tmp_path).review_contact(chat_id=7, decision="ignore_spam")
+    context, notes = MessageStore(tmp_path).read_chat_context_document(7)
+
+    assert payload["decision"] == "ignore_spam"
+    assert context["relationship"] == "unwanted contact / spam"
+    assert context["tone"] == "Already documented tone."
+    assert context["do_not_draft"] is True
+    assert context["auto_approve"] is False
+    assert "Do not draft replies" in context["agent_notes"]
+    assert "Unwanted sender" in notes
+
+
 def test_web_browses_and_manually_links_synced_contacts(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
     with IMessageArchive(tmp_path / "imessage.sqlite") as archive:

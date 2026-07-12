@@ -255,6 +255,11 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Choose a synced contact card as the configurable Orbit center
   - ✅ Use that card's name and photo in Orbit, with the existing vCard fallback
 
+#### Contact Safety Controls
+- ✅ **Ignore and spam policy**
+  - ✅ Turn an Ignore / spam review into a visible, non-engagement context policy
+  - ✅ Preserve existing operator context while filling blank policy guidance
+
 #### AI Action Layer
 - ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor
 - ✅ `scripts/install_agent_worker_launchd.sh` — install worker as separate LaunchAgent

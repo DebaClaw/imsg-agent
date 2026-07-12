@@ -509,6 +509,40 @@ class OperatorService:
                 identifier=identifier,
             )
             result["candidate_path"] = str(candidate)
+        if decision == "ignore_spam":
+            current, current_notes = store.read_chat_context_document(chat_id)
+            defaults = {
+                "relationship": "unwanted contact / spam",
+                "tone": (
+                    "Do not engage. Only send a concise decline or unsubscribe request "
+                    "when the operator explicitly asks."
+                ),
+                "agent_notes": (
+                    "Do not draft replies for this sender. If the operator explicitly requests "
+                    "a reply, keep it brief and ask not to be contacted again."
+                ),
+            }
+            fields: JSON = {
+                key: value
+                for key, value in defaults.items()
+                if not str(current.get(key) or "").strip()
+            }
+            fields["do_not_draft"] = True
+            fields["auto_approve"] = False
+            context_result = self.update_chat_context(
+                chat_id,
+                fields=fields,
+                notes=(
+                    current_notes
+                    if current_notes.strip()
+                    else (
+                        "Unwanted sender. Do not engage or draft a response without "
+                        "explicit operator direction."
+                    )
+                ),
+            )
+            result["context"] = context_result["context"]
+            result["notes"] = context_result["notes"]
         return result
 
     def mark_no_reply(

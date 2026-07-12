@@ -937,6 +937,10 @@ function renderContactBox(payload, row) {
           method: "POST",
           body: JSON.stringify({ chat_id: Number(row.chat_id), decision }),
         });
+        if (decision === "ignore_spam") {
+          state.chatPanel = "context";
+          await openChat(row);
+        }
       }));
       actions.append(button);
     });
