@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+UV_BIN="${UV_BIN:-$(command -v uv || true)}"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/imsg-admin {monitor|worker|web|all} {start|stop|restart|status|logs} [options]
+
+Components:
+  monitor   Archive monitor LaunchAgent (imsg rpc -> local SQLite archive)
+  worker    Archive-backed AI worker LaunchAgent
+  web       Local web GUI process
+  all       Start, stop, restart, or show status for every component
+
+Examples:
+  scripts/imsg-admin monitor restart
+  scripts/imsg-admin worker logs --errors --lines 120
+  scripts/imsg-admin web restart --port 8787
+  scripts/imsg-admin all status
+
+The monitor and worker must first be installed with their corresponding
+install_*_launchd.sh script. The web process is managed by scripts/imsg-agent.
+EOF
+}
+
+component="${1:-}"
+action="${2:-}"
+if [[ "$component" == "-h" || "$component" == "--help" ]]; then
+  usage
+  exit 0
+fi
+if [[ "$action" == "-h" || "$action" == "--help" ]]; then
+  usage
+  exit 0
+fi
+if [[ -z "$component" || -z "$action" ]]; then
+  usage >&2
+  exit 2
+fi
+shift 2
+
+if [[ ! "$component" =~ ^(monitor|worker|web|all)$ ]]; then
+  echo "Unknown component: $component" >&2
+  usage >&2
+  exit 2
+fi
+if [[ ! "$action" =~ ^(start|stop|restart|status|logs)$ ]]; then
+  echo "Unknown action: $action" >&2
+  usage >&2
+  exit 2
+fi
+if [[ "$component" == "all" && "$action" == "logs" ]]; then
+  echo "Use monitor, worker, or web when reading logs." >&2
+  exit 2
+fi
+
+run_ctl() {
+  if [[ -z "$UV_BIN" ]]; then
+    echo "uv not found in PATH. Set UV_BIN=/path/to/uv and retry." >&2
+    exit 1
+  fi
+  (
+    cd "$REPO_DIR"
+    "$UV_BIN" run imsg-agentctl "$@"
+  )
+}
+
+run_component() {
+  local name="$1"
+  shift
+  if [[ "$name" == "web" ]]; then
+    if [[ "$action" == "logs" ]]; then
+      local log_dir="${LOG_DIR:-${IMSG_DATA_DIR:-$HOME/imsg-data}/logs}"
+      local log_name="imsg-agent-web.log"
+      local lines=80
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --errors)
+            log_name="imsg-agent-web.err.log"
+            shift
+            ;;
+          --lines)
+            lines="${2:?--lines requires a value}"
+            shift 2
+            ;;
+          *)
+            echo "Unknown web log option: $1" >&2
+            exit 2
+            ;;
+        esac
+      done
+      tail -n "$lines" "$log_dir/$log_name"
+      return
+    fi
+    exec "$REPO_DIR/scripts/imsg-agent" "$@"
+  fi
+  if [[ "$action" == "logs" ]]; then
+    (
+      cd "$REPO_DIR"
+      exec "${UV_BIN:?uv not found}" run imsg-agentctl logs "$name" "$@"
+    )
+    return
+  fi
+  (
+    cd "$REPO_DIR"
+    exec "${UV_BIN:?uv not found}" run imsg-agentctl service "$action" "$name"
+  )
+}
+
+if [[ "$component" != "all" ]]; then
+  run_component "$component" "$action" "$@"
+  exit 0
+fi
+
+for name in monitor worker web; do
+  echo "== $name =="
+  if [[ "$name" == "web" ]]; then
+    "$REPO_DIR/scripts/imsg-agent" "$action" "$@"
+  else
+    run_ctl service "$action" "$name"
+  fi
+done

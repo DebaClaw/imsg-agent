@@ -283,6 +283,11 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Add incoming/outgoing/either direction and time-window controls
   - ✅ Page through all matching threads without overcrowding the attention field
 
+#### macOS Administration
+- ✅ **Service admin scripts**
+  - ✅ Add consistent start, stop, restart, status, and log controls for monitor, worker, and web
+  - ✅ Document the macOS launchctl restart path and script entrypoints
+
 #### AI Action Layer
 - ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor
 - ✅ `scripts/install_agent_worker_launchd.sh` — install worker as separate LaunchAgent

@@ -73,6 +73,7 @@ web/              Static assets for the local operator GUI
 scripts/setup.sh  Environment and data-directory setup
 scripts/install_launchd.sh  Install a user LaunchAgent for archive monitoring
 scripts/install_agent_worker_launchd.sh  Install archive-backed AI worker service
+scripts/imsg-admin  Start, stop, restart, inspect, and read logs for local services
 tests/            Unit tests with fixtures, no live Messages database required
 ```
 
@@ -233,6 +234,12 @@ Stop it with:
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.imsg-agent.archive-monitor.plist
 ```
 
+Restart a loaded LaunchAgent directly with:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.imsg-agent.archive-monitor
+```
+
 ## Archive-Backed AI Worker
 
 The recommended service split is:
@@ -294,6 +301,21 @@ uv run imsg-agentctl service restart worker
 uv run imsg-agentctl logs monitor --lines 80
 uv run imsg-agentctl logs worker --errors --lines 80
 ```
+
+For day-to-day macOS administration, the scripts provide the same verbs for the archive
+monitor, AI worker, and web GUI:
+
+```bash
+scripts/imsg-monitor restart
+scripts/imsg-worker restart
+scripts/imsg-web restart
+scripts/imsg-admin all status
+scripts/imsg-admin worker logs --errors --lines 120
+scripts/imsg-admin web logs --lines 120
+```
+
+`monitor` and `worker` are user LaunchAgents, so their restart action uses `launchctl`
+under the current user. The web GUI remains PID-managed through `scripts/imsg-agent`.
 
 `pending` joins the deterministic latest-inbound queue with matching draft/outbox/sent/error
 artifacts by `source_rowid`, so it answers "what needs a reply and what did the agent
