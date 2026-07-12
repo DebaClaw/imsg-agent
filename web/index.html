@@ -31,7 +31,7 @@
             <h1>The Relationship Observatory</h1>
           </div>
           <div class="status-strip" id="statusStrip" aria-live="polite"></div>
-          <button class="ghost-button" id="operatorButton" type="button">Operator</button>
+          <button class="ghost-button" id="operatorButton" type="button">Settings</button>
         </header>
 
         <section class="workbench" id="overviewView">
@@ -119,6 +119,18 @@
               <button type="submit">Search</button>
             </form>
             <div class="table-list" id="contactsList"></div>
+          </div>
+        </section>
+
+        <section class="workbench hidden" id="settingsView">
+          <div class="list-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">local configuration</p>
+                <h2>Settings</h2>
+              </div>
+            </div>
+            <div class="settings-grid" id="settingsContent"></div>
           </div>
         </section>
 

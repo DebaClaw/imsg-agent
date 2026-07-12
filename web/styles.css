@@ -869,6 +869,45 @@ body.chat-selected .detail {
   gap: 10px;
 }
 
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  padding: 18px;
+}
+
+.settings-section {
+  min-width: 0;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-section:last-child {
+  border-bottom: 0;
+}
+
+.pagination {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.icon-button {
+  min-width: 42px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 800;
+}
+
 .operator-contact-card {
   display: flex;
   min-height: 58px;
@@ -1255,6 +1294,10 @@ button:disabled {
   }
 
   .workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-grid {
     grid-template-columns: 1fr;
   }
 

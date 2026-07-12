@@ -79,6 +79,12 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
                 limit=_query_int(query, "limit", 50),
                 query=_query_str(query, "q", ""),
             )
+        if parts == ["api", "contacts", "page"]:
+            return service.contacts_page(
+                limit=_query_int(query, "limit", 50),
+                offset=_query_optional_int(query, "offset") or 0,
+                query=_query_str(query, "q", ""),
+            )
         if len(parts) == 3 and parts[:2] == ["api", "contacts"]:
             return service.contact(parts[2])
         if parts == ["api", "pending"]:

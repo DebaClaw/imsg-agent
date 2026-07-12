@@ -265,6 +265,13 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Turn an Ignore / spam review into a visible, non-engagement context policy
   - ✅ Preserve existing operator context while filling blank policy guidance
 
+#### Settings and Large Lists
+- ✅ **Global settings workspace**
+  - ✅ Make the persistent Operator control open a full Settings workspace from every view
+  - ✅ Consolidate operator identity and review-queue configuration there
+- ✅ **Contact selection at scale**
+  - ✅ Add substring filtering and pagination to contact lists and identity-card selection
+
 #### AI Action Layer
 - ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor
 - ✅ `scripts/install_agent_worker_launchd.sh` — install worker as separate LaunchAgent

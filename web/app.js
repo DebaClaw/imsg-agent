@@ -8,6 +8,8 @@ const state = {
   operator: null,
   preferences: null,
   revision: "",
+  contactsQuery: "",
+  contactsOffset: 0,
 };
 
 const signalColors = ["--signal-0", "--signal-1", "--signal-2", "--signal-3", "--signal-4"];
@@ -106,6 +108,7 @@ function setActiveView(view) {
     !["pending", "attention", "recent", "views", "issues"].includes(view),
   );
   document.getElementById("contactsView").classList.toggle("hidden", view !== "contacts");
+  document.getElementById("settingsView").classList.toggle("hidden", view !== "settings");
   document.getElementById("searchView").classList.toggle("hidden", view !== "search");
   document.getElementById("opsView").classList.toggle("hidden", view !== "ops");
 }
@@ -627,9 +630,12 @@ async function loadList(view) {
   }
 }
 
-async function loadContacts(query = "") {
+async function loadContacts(query = state.contactsQuery, offset = 0) {
   setActiveView("contacts");
-  const rows = await api(`/api/contacts?limit=100&q=${encodeURIComponent(query)}`);
+  state.contactsQuery = query;
+  state.contactsOffset = offset;
+  const page = await api(`/api/contacts/page?limit=40&offset=${offset}&q=${encodeURIComponent(query)}`);
+  const rows = page.items || [];
   const list = document.getElementById("contactsList");
   list.replaceChildren();
   if (!rows.length) {
@@ -654,6 +660,23 @@ async function loadContacts(query = "") {
     button.addEventListener("click", () => openContact(row.contact_id));
     list.append(button);
   });
+  list.append(renderPagination(page, (nextOffset) => loadContacts(query, nextOffset)));
+}
+
+function renderPagination(page, onPage) {
+  const controls = el("div", "pagination");
+  const previous = el("button", "icon-button", "Previous");
+  previous.type = "button";
+  previous.disabled = Number(page.offset || 0) === 0;
+  previous.addEventListener("click", () => onPage(Math.max(0, Number(page.offset || 0) - Number(page.limit || 40))));
+  const next = el("button", "icon-button", "Next");
+  next.type = "button";
+  next.disabled = page.next_offset === null || page.next_offset === undefined;
+  next.addEventListener("click", () => onPage(Number(page.next_offset)));
+  const items = page.items || [];
+  const first = items.length ? Number(page.offset || 0) + 1 : 0;
+  controls.append(previous, el("span", "", `${first}-${Number(page.offset || 0) + items.length} of ${Number(page.total || 0)}`), next);
+  return controls;
 }
 
 async function openContact(contactId) {
@@ -682,7 +705,7 @@ async function openContact(contactId) {
   panel.append(points);
   const back = el("button", "ghost-button", "Back to contacts");
   back.type = "button";
-  back.addEventListener("click", () => loadContacts());
+  back.addEventListener("click", () => loadContacts(state.contactsQuery, state.contactsOffset));
   const save = el("button", "inline-action", "Save contact");
   save.type = "button";
   save.addEventListener("click", () => runAction(save, async () => {
@@ -1151,39 +1174,42 @@ async function refreshAfterMutation(message) {
   pane.append(box);
 }
 
-async function openOperatorProfile() {
-  document.body.classList.add("chat-selected");
-  const pane = document.getElementById("detailPane");
-  pane.replaceChildren();
-  const loading = el("div", "empty-state");
-  loading.append(el("p", "eyebrow", "operator identity"), el("h2", "", "Orbit center"));
-  loading.append(el("p", "", "Loading synced contact cards."));
-  pane.append(loading);
-  const contacts = await api("/api/contacts?limit=100");
-  const wrap = el("div", "chat-detail");
-  const profile = state.operator || {};
+async function openSettings() {
+  closeWorkbench();
+  setActiveView("settings");
+  await renderSettings();
+}
+
+async function renderSettings() {
+  const [profile, preferences] = await Promise.all([api("/api/operator"), api("/api/preferences")]);
+  state.operator = profile;
+  state.preferences = preferences;
+  const content = document.getElementById("settingsContent");
+  content.replaceChildren();
+
   const identity = profile.identity || {};
-  wrap.append(el("p", "eyebrow", "operator identity"));
-  wrap.append(el("h2", "", "Orbit center"));
-  const contactLabel = el("label", "field", "My contact card");
+  const identitySection = el("section", "settings-section");
+  identitySection.append(el("p", "eyebrow", "operator identity"), el("h2", "", "Who am I?"));
+  const name = input("Name", text(identity.name, text(profile.name, "Me")));
+  const aliases = input("My addresses and handles (comma separated)", (identity.aliases || profile.aliases || []).join(", "));
+  const vcard = input("vCard photo fallback", text(profile.vcard_path));
+  const filter = input("Find my contact card", "");
   const contact = document.createElement("select");
   contact.className = "contact-select";
-  contact.append(new Option("Use a fallback identity", ""));
-  contacts.forEach((entry) => {
-    const organization = text(entry.organization_name);
-    contact.append(new Option(
-      organization ? `${text(entry.full_name, entry.contact_id)} - ${organization}` : text(entry.full_name, entry.contact_id),
-      entry.contact_id,
-    ));
-  });
-  contact.value = text(profile.contact_id);
+  const contactLabel = el("label", "field", "My contact card");
   contactLabel.append(contact);
   const card = el("div", "operator-contact-card");
+  const pickerPager = el("div", "");
+  let selectedContactId = text(profile.contact_id);
+  let contactPage = { items: [] };
+  let filterTimer = 0;
+
   const renderCard = () => {
     card.replaceChildren();
-    const selected = contacts.find((entry) => entry.contact_id === contact.value);
+    const selected = (contactPage.items || []).find((entry) => entry.contact_id === selectedContactId)
+      || (profile.contact && profile.contact.contact_id === selectedContactId ? profile.contact : null);
     if (!selected) {
-      card.append(el("p", "", "Using your fallback name and optional vCard photo."));
+      card.append(el("p", "", "No contact card selected."));
       return;
     }
     if (selected.photo_data_uri) {
@@ -1198,45 +1224,60 @@ async function openOperatorProfile() {
     if (selected.organization_name) copy.append(el("span", "", selected.organization_name));
     card.append(copy);
   };
-  contact.addEventListener("change", renderCard);
-  renderCard();
-  const name = input("Who am I?", text(identity.name, text(profile.name, "Me")));
-  const vcard = input("vCard photo fallback", text(profile.vcard_path));
-  const aliases = input("My addresses and handles (comma separated)", (identity.aliases || profile.aliases || []).join(", "));
-  const save = el("button", "inline-action", "Save operator profile");
-  save.type = "button";
-  save.addEventListener("click", () => runAction(save, async () => {
+
+  const loadContactPicker = async (offset = 0) => {
+    contactPage = await api(`/api/contacts/page?limit=40&offset=${offset}&q=${encodeURIComponent(filter.input.value.trim())}`);
+    contact.replaceChildren(new Option("No linked contact card", ""));
+    (contactPage.items || []).forEach((entry) => {
+      const organization = text(entry.organization_name);
+      contact.append(new Option(
+        organization ? `${text(entry.full_name, entry.contact_id)} - ${organization}` : text(entry.full_name, entry.contact_id),
+        entry.contact_id,
+      ));
+    });
+    if (selectedContactId && ![...contact.options].some((option) => option.value === selectedContactId)) {
+      const linked = profile.contact || {};
+      contact.append(new Option(text(linked.full_name, selectedContactId), selectedContactId));
+    }
+    contact.value = selectedContactId;
+    pickerPager.replaceChildren(renderPagination(contactPage, loadContactPicker));
+    renderCard();
+  };
+
+  contact.addEventListener("change", () => {
+    selectedContactId = contact.value;
+    renderCard();
+  });
+  filter.input.addEventListener("input", () => {
+    window.clearTimeout(filterTimer);
+    filterTimer = window.setTimeout(() => loadContactPicker(0), 180);
+  });
+  const saveIdentity = el("button", "inline-action", "Save identity");
+  saveIdentity.type = "button";
+  saveIdentity.addEventListener("click", () => runAction(saveIdentity, async () => {
     await api("/api/operator", {
       method: "POST",
       body: JSON.stringify({ fields: {
         name: name.input.value,
         vcard_path: vcard.input.value,
-        contact_id: contact.value,
+        contact_id: selectedContactId,
         aliases: aliases.input.value.split(",").map((item) => item.trim()).filter(Boolean),
       } }),
     });
     await loadOverview();
-    closeWorkbench();
+    await renderSettings();
   }));
-  wrap.append(contactLabel, card, name.label, vcard.label, aliases.label, save);
-  pane.append(wrap);
-}
+  identitySection.append(name.label, aliases.label, vcard.label, filter.label, contactLabel, pickerPager, card, saveIdentity);
 
-function openPreferences() {
-  document.body.classList.add("chat-selected");
-  const pane = document.getElementById("detailPane");
-  pane.replaceChildren();
-  const wrap = el("div", "chat-detail");
-  const preferences = state.preferences || {};
-  wrap.append(el("p", "eyebrow", "queue rules"));
-  wrap.append(el("h2", "", "Pending drafts"));
+  const queueSection = el("section", "settings-section");
+  queueSection.append(el("p", "eyebrow", "queue rules"), el("h2", "", "Pending drafts"));
   const days = input("Show the last N days (0 is all history)", String(preferences.pending_days ?? 7));
   const relationships = input("Connection types (comma separated)", (preferences.relationship_types || []).join(", "));
   const grouped = checkbox("Group by connection type", preferences.group_pending_by_relationship !== false);
   const archived = checkbox("Show archived drafts", Boolean(preferences.show_archived_drafts));
-  const save = el("button", "inline-action", "Save queue settings");
-  save.type = "button";
-  save.addEventListener("click", () => runAction(save, async () => {
+  const saveQueue = el("button", "inline-action", "Save queue settings");
+  saveQueue.type = "button";
+  saveQueue.addEventListener("click", () => runAction(saveQueue, async () => {
     await api("/api/preferences", {
       method: "POST",
       body: JSON.stringify({ fields: {
@@ -1247,10 +1288,19 @@ function openPreferences() {
       } }),
     });
     await loadOverview();
-    closeWorkbench();
+    await renderSettings();
   }));
-  wrap.append(days.label, relationships.label, grouped.label, archived.label, save);
-  pane.append(wrap);
+  queueSection.append(days.label, relationships.label, grouped.label, archived.label, saveQueue);
+  content.append(identitySection, queueSection);
+  await loadContactPicker();
+}
+
+function openOperatorProfile() {
+  return openSettings();
+}
+
+function openPreferences() {
+  return openSettings();
 }
 
 async function runSearch(event) {
@@ -1329,7 +1379,7 @@ document.getElementById("refreshButton").addEventListener("click", (event) => {
   runAction(event.currentTarget, loadOverview);
 });
 document.getElementById("operatorButton").addEventListener("click", () => openOperatorProfile().catch((error) => showError(error.message)));
-document.getElementById("preferencesButton").addEventListener("click", () => openPreferences());
+document.getElementById("preferencesButton").addEventListener("click", () => openPreferences().catch((error) => showError(error.message)));
 document.getElementById("opsRefreshButton").addEventListener("click", (event) => {
   runAction(event.currentTarget, loadOps);
 });
@@ -1338,12 +1388,12 @@ document.getElementById("searchForm").addEventListener("submit", (event) => {
 });
 document.getElementById("contactsSearchForm").addEventListener("submit", (event) => {
   event.preventDefault();
-  runAction(event.submitter, () => loadContacts(document.getElementById("contactsSearchInput").value.trim()));
+  runAction(event.submitter, () => loadContacts(document.getElementById("contactsSearchInput").value.trim(), 0));
 });
 document.getElementById("contactsSyncButton").addEventListener("click", (event) => {
   runAction(event.currentTarget, async () => {
     await api("/api/contacts/sync", { method: "POST" });
-    await loadContacts();
+    await loadContacts(state.contactsQuery, 0);
   });
 });
 document.getElementById("contactsNewButton").addEventListener("click", () => openNewContact());

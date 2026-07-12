@@ -341,6 +341,28 @@ def test_web_browses_and_manually_links_synced_contacts(tmp_path: Path) -> None:
     assert unlinked["contacts"] == []
 
 
+def test_web_contacts_page_filters_substrings_and_pages_results(tmp_path: Path) -> None:
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.replace_contacts(
+            contacts_from_json(
+                [
+                    {"id": "contact-1", "fullName": "Jane Doe"},
+                    {"id": "contact-2", "fullName": "Jon Doe"},
+                    {"id": "contact-3", "fullName": "Ada Lovelace"},
+                ]
+            )
+        )
+
+    service = _service(tmp_path)
+    doe = service.contacts_page(limit=1, offset=1, query="oe")
+    substring = service.contacts_page(limit=10, offset=0, query="on")
+
+    assert doe["total"] == 2
+    assert doe["items"][0]["full_name"] == "Jon Doe"
+    assert doe["next_offset"] is None
+    assert substring["items"][0]["full_name"] == "Jon Doe"
+
+
 def test_web_chat_accepts_a_before_cursor(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
     later = _message(rowid=101)

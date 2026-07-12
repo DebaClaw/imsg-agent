@@ -13,6 +13,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from .contact_enrichment import (
     ContactRecord,
@@ -903,7 +904,26 @@ class IMessageArchive:
         return [self._row_to_dict(row) for row in rows]
 
     def contacts(self, *, limit: int = 50, query: str = "") -> list[ArchiveRow]:
+        page = self.contacts_page(limit=limit, offset=0, query=query)
+        return cast(list[ArchiveRow], page["items"])
+
+    def contacts_page(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        query: str = "",
+    ) -> ArchiveRow:
         pattern = f"%{query.strip()}%"
+        total = int(
+            self._db.execute(
+                """
+                SELECT COUNT(*) FROM contacts
+                WHERE full_name LIKE ? OR organization_name LIKE ?
+                """,
+                (pattern, pattern),
+            ).fetchone()[0]
+        )
         rows = self._db.execute(
             """
             SELECT
@@ -919,14 +939,21 @@ class IMessageArchive:
             LEFT JOIN contact_points ON contact_points.contact_id = contacts.contact_id
             WHERE contacts.full_name LIKE ?
                 OR contacts.organization_name LIKE ?
-                OR contacts.contact_id LIKE ?
             GROUP BY contacts.contact_id
             ORDER BY contacts.full_name COLLATE NOCASE, contacts.contact_id
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (pattern, pattern, pattern, limit),
+            (pattern, pattern, limit, offset),
         ).fetchall()
-        return [self._row_to_dict(row) for row in rows]
+        items = [self._row_to_dict(row) for row in rows]
+        next_offset = offset + len(items)
+        return {
+            "items": items,
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "next_offset": next_offset if next_offset < total else None,
+        }
 
     def contact(self, contact_id: str) -> ArchiveRow:
         row = self._db.execute(

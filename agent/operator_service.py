@@ -271,6 +271,14 @@ class OperatorService:
         with IMessageArchive(self.db_path) as archive:
             return archive.contacts(limit=limit, query=query)
 
+    def contacts_page(self, *, limit: int = 50, offset: int = 0, query: str = "") -> JSON:
+        if limit < 1 or limit > 100:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "limit must be 1 to 100")
+        if offset < 0:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "offset must not be negative")
+        with IMessageArchive(self.db_path) as archive:
+            return archive.contacts_page(limit=limit, offset=offset, query=query)
+
     def contact(self, contact_id: str) -> JSON:
         with IMessageArchive(self.db_path) as archive:
             detail = archive.contact(contact_id)
