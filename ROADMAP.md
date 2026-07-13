@@ -278,6 +278,9 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Add substring filtering and pagination to contact lists and identity-card selection
 - ✅ **Identity card picker ergonomics**
   - ✅ Put a clearly labeled live filter directly above the paginated identity-card list
+- ✅ **Conversation contact linking at scale**
+  - ✅ Replace the limited native contact select with a searchable, paginated picker
+  - ✅ Match any name or organization substring in the context workspace
 
 #### Orbit Relationship Ranking and Exploration
 - ✅ **Relationship-aware Orbit ranking**

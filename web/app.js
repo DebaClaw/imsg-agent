@@ -834,11 +834,7 @@ async function openChat(row) {
   document.body.classList.add("chat-selected");
   renderChatLoading(row);
   try {
-    const [payload, contacts] = await Promise.all([
-      api(`/api/chats/${chatId}/messages?limit=40`),
-      api("/api/contacts?limit=100"),
-    ]);
-    payload.available_contacts = contacts;
+    const payload = await api(`/api/chats/${chatId}/messages?limit=40`);
     state.selectedChat = payload;
     renderChat(payload, row);
   } catch (error) {
@@ -982,20 +978,64 @@ function renderContactBox(payload, row) {
     });
     return box;
   }
+  const picker = el("div", "contact-link-picker");
+  const filter = input("Find a synced contact", "");
+  filter.input.placeholder = "Type any part of a name or organization";
+  filter.input.autocomplete = "off";
   const select = document.createElement("select");
   select.className = "contact-select";
-  select.append(new Option("Link a synced contact", ""));
-  (payload.available_contacts || []).forEach((contact) => {
-    select.append(new Option(text(contact.full_name, contact.contact_id), contact.contact_id));
+  select.size = 6;
+  const selectLabel = el("label", "field", "Matching synced contacts");
+  selectLabel.append(select);
+  const pager = el("div", "");
+  const status = el("p", "picker-status");
+  let selectedContactId = "";
+  let filterTimer = 0;
+
+  const loadContactPage = async (offset = 0) => {
+    const page = await api(
+      `/api/contacts/page?limit=40&offset=${offset}&q=${encodeURIComponent(filter.input.value.trim())}`,
+    );
+    select.replaceChildren(new Option("Choose a synced contact", ""));
+    (page.items || []).forEach((contact) => {
+      const organization = text(contact.organization_name);
+      select.append(new Option(
+        organization
+          ? `${text(contact.full_name, contact.contact_id)} - ${organization}`
+          : text(contact.full_name, contact.contact_id),
+        contact.contact_id,
+      ));
+    });
+    if (selectedContactId && [...select.options].some((option) => option.value === selectedContactId)) {
+      select.value = selectedContactId;
+    } else {
+      selectedContactId = "";
+    }
+    pager.replaceChildren(renderPagination(page, loadContactPage));
+    status.textContent = page.total
+      ? `${page.total} matching synced contacts`
+      : "No synced contacts match this filter.";
+  };
+
+  select.addEventListener("change", () => {
+    selectedContactId = select.value;
+  });
+  filter.input.addEventListener("input", () => {
+    window.clearTimeout(filterTimer);
+    filterTimer = window.setTimeout(() => {
+      loadContactPage(0).catch((error) => showError(error.message));
+    }, 180);
   });
   const link = el("button", "inline-action", "Link contact");
   link.type = "button";
   link.addEventListener("click", () => runAction(link, async () => {
-    if (!select.value) throw new Error("Choose a synced contact first.");
-    await api("/api/contacts/link", { method: "POST", body: JSON.stringify({ chat_id: Number(row.chat_id), contact_id: select.value }) });
+    if (!selectedContactId) throw new Error("Choose a synced contact first.");
+    await api("/api/contacts/link", { method: "POST", body: JSON.stringify({ chat_id: Number(row.chat_id), contact_id: selectedContactId }) });
     await openChat(row);
   }));
-  box.append(select, link);
+  picker.append(filter.label, selectLabel, pager, status, link);
+  box.append(picker);
+  loadContactPage().catch((error) => showError(error.message));
   const actions = el("div", "draft-actions contact-actions");
   [["keep_local", "Keep local"], ["prepare_contact", "Prepare contact"], ["ignore_spam", "Ignore / spam"]]
     .forEach(([decision, label]) => {
