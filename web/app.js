@@ -10,6 +10,7 @@ const state = {
   revision: "",
   contactsQuery: "",
   contactsOffset: 0,
+  contactEditor: null,
   orbitDirection: "incoming",
   orbitDays: 7,
   orbitIncludeSpam: false,
@@ -669,6 +670,8 @@ async function loadList(view) {
 
 async function loadContacts(query = state.contactsQuery, offset = 0) {
   setActiveView("contacts");
+  state.contactEditor = null;
+  setContactsSyncLabel(false);
   state.contactsQuery = query;
   state.contactsOffset = offset;
   const page = await api(`/api/contacts/page?limit=40&offset=${offset}&q=${encodeURIComponent(query)}`);
@@ -717,6 +720,8 @@ function renderPagination(page, onPage) {
 }
 
 async function openContact(contactId) {
+  state.contactEditor = null;
+  setContactsSyncLabel(false);
   const contact = await api(`/api/contacts/${encodeURIComponent(contactId)}`);
   const list = document.getElementById("contactsList");
   list.replaceChildren();
@@ -741,6 +746,9 @@ async function openContact(contactId) {
   importance.input.max = "5";
   importance.input.step = "1";
   const notes = textarea("Notes", text(contact.notes), "short-textarea");
+  const editor = { contactId, name, organization, email, phone, categories, importance, notes };
+  state.contactEditor = editor;
+  setContactsSyncLabel(true);
   panel.append(name.label, organization.label, email.label, phone.label, categories.label, importance.label, notes.label);
   const points = el("div", "contact-points");
   (contact.points || []).forEach((point) => points.append(el("p", "", `${point.kind}: ${point.original_value || point.value}`)));
@@ -751,14 +759,7 @@ async function openContact(contactId) {
   const save = el("button", "inline-action", "Save contact");
   save.type = "button";
   save.addEventListener("click", () => runAction(save, async () => {
-    await api(`/api/contacts/${encodeURIComponent(contactId)}/update`, {
-      method: "POST",
-      body: JSON.stringify({ fields: contactFields(name, organization, email, phone, categories, notes) }),
-    });
-    await api(`/api/contacts/${encodeURIComponent(contactId)}/importance`, {
-      method: "POST",
-      body: JSON.stringify({ importance: Number(importance.input.value) }),
-    });
+    await persistContactEditor(editor);
     await openContact(contactId);
   }));
   const remove = el("button", "contact-delete", "Archive contact");
@@ -775,6 +776,8 @@ async function openContact(contactId) {
 }
 
 function openNewContact(seed = {}) {
+  state.contactEditor = null;
+  setContactsSyncLabel(false);
   const list = document.getElementById("contactsList");
   list.replaceChildren();
   const panel = el("section", "contact-detail");
@@ -800,6 +803,8 @@ function openNewContact(seed = {}) {
 }
 
 function openBusinessResearch() {
+  state.contactEditor = null;
+  setContactsSyncLabel(false);
   const list = document.getElementById("contactsList");
   list.replaceChildren();
   const panel = el("section", "contact-detail business-research");
@@ -869,6 +874,32 @@ function contactFields(name, organization, email, phone, categories, notes) {
   if (email.input.value.trim()) fields.emails = [{ value: email.input.value.trim(), primary: true }];
   if (phone.input.value.trim()) fields.phones = [{ value: phone.input.value.trim(), primary: true }];
   return fields;
+}
+
+async function persistContactEditor(editor) {
+  await api(`/api/contacts/${encodeURIComponent(editor.contactId)}/update`, {
+    method: "POST",
+    body: JSON.stringify({
+      fields: contactFields(
+        editor.name,
+        editor.organization,
+        editor.email,
+        editor.phone,
+        editor.categories,
+        editor.notes,
+      ),
+    }),
+  });
+  await api(`/api/contacts/${encodeURIComponent(editor.contactId)}/importance`, {
+    method: "POST",
+    body: JSON.stringify({ importance: Number(editor.importance.input.value) }),
+  });
+}
+
+function setContactsSyncLabel(savesEditor) {
+  document.getElementById("contactsSyncButton").textContent = savesEditor
+    ? "Save & sync contacts"
+    : "Sync contacts";
 }
 
 function contactPoint(points, kind) {
@@ -1567,7 +1598,11 @@ document.getElementById("contactsSearchForm").addEventListener("submit", (event)
 document.getElementById("contactsResearchButton").addEventListener("click", openBusinessResearch);
 document.getElementById("contactsSyncButton").addEventListener("click", (event) => {
   runAction(event.currentTarget, async () => {
-    await api("/api/contacts/sync", { method: "POST" });
+    if (state.contactEditor) {
+      await persistContactEditor(state.contactEditor);
+    } else {
+      await api("/api/contacts/sync", { method: "POST" });
+    }
     await loadContacts(state.contactsQuery, 0);
   });
 });

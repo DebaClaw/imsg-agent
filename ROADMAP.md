@@ -293,6 +293,11 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Normalize discovered phone numbers and report their evidence status
   - ✅ Let the operator review and explicitly create a contact from a research candidate
 
+#### Contact Sync Integrity
+- ✅ **Save active contact edits before syncing**
+  - ✅ Track the active Contacts editor in the web UI
+  - ✅ Push its fields to contacts-mcp before refreshing the local Contacts archive
+
 #### Orbit Relationship Ranking and Exploration
 - ✅ **Relationship-aware Orbit ranking**
   - ✅ Add a local per-contact importance override
