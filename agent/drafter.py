@@ -138,6 +138,7 @@ class Drafter:
         message: Message,
         *,
         history_override: str | None = None,
+        operator_requested: bool = False,
     ) -> Draft | None:
         context, context_body = self._store.read_chat_context_document(message.chat_id)
         history = (
@@ -153,7 +154,7 @@ class Drafter:
                 message.chat_id,
             )
             return None
-        if message.is_from_me:
+        if message.is_from_me and not operator_requested:
             logger.debug("Skipping rowid=%d; message is from operator", message.rowid)
             return None
         if message.is_reaction:
@@ -185,7 +186,7 @@ class Drafter:
             return None
 
         model = str(context.get("model") or self._default_model)
-        auto_approved = self._should_auto_approve(context)
+        auto_approved = False if operator_requested else self._should_auto_approve(context)
         created_at = self._current_time()
         draft_uuid = f"{created_at.strftime('%Y%m%dT%H%M%SZ')}-{message.rowid}"
 
@@ -198,6 +199,7 @@ class Drafter:
                 history=history,
                 new_message_text=message.text,
                 source_rowid=message.rowid,
+                operator_requested=operator_requested,
             ),
         )
         if not response.should_reply:
@@ -258,6 +260,7 @@ class Drafter:
         history: str,
         new_message_text: str,
         source_rowid: int,
+        operator_requested: bool = False,
     ) -> str:
         structured_context = {
             key: context.get(key)
@@ -282,7 +285,12 @@ class Drafter:
                 "CHAT CONTEXT NOTES\n" + (context_body.strip() or "(none)"),
                 "CURRENT TIME\n" + self._current_time().isoformat().replace("+00:00", "Z"),
                 "RECENT CHAT HISTORY\n" + (history.strip() or "(none)"),
-                f"NEW MESSAGE rowid={source_rowid}\n{new_message_text.strip()}",
+                (
+                    f"OPERATOR REQUESTED A FOLLOW-UP after rowid={source_rowid}\n"
+                    f"Latest message: {new_message_text.strip()}"
+                    if operator_requested
+                    else f"NEW MESSAGE rowid={source_rowid}\n{new_message_text.strip()}"
+                ),
                 (
                     "Return strict JSON only with keys should_reply, proposed_text, and "
                     "reasoning. should_reply is false when no reply is needed or when a "

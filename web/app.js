@@ -73,8 +73,14 @@ function snippet(value, max = 130) {
   return `${clean.slice(0, max - 3)}...`;
 }
 
+function detailPane() {
+  return state.activeView === "overview"
+    ? document.getElementById("detailPane")
+    : document.getElementById("listDetailPane");
+}
+
 function showError(message) {
-  const pane = document.getElementById("detailPane");
+  const pane = detailPane();
   pane.replaceChildren();
   const box = el("div", "empty-state");
   box.append(el("p", "eyebrow", "action failed"));
@@ -919,7 +925,7 @@ function safeJsonArray(value) {
 async function openChat(row) {
   const sameChat = Number(state.selectedRow?.chat_id) === Number(row.chat_id);
   state.selectedRow = row;
-  if (!sameChat) state.chatPanel = "context";
+  if (!sameChat) state.chatPanel = "messages";
   const chatId = row.chat_id;
   if (!chatId) return;
   document.body.classList.add("chat-selected");
@@ -927,14 +933,15 @@ async function openChat(row) {
   try {
     const payload = await api(`/api/chats/${chatId}/messages?limit=40`);
     state.selectedChat = payload;
-    renderChat(payload, row);
+    state.selectedRow = { ...row, ...(payload.reply || {}) };
+    renderChat(payload, state.selectedRow);
   } catch (error) {
     showError(error.message);
   }
 }
 
 function renderChatLoading(row) {
-  const pane = document.getElementById("detailPane");
+  const pane = detailPane();
   pane.replaceChildren();
   const box = el("div", "empty-state");
   box.append(el("p", "eyebrow", "opening conversation"));
@@ -948,7 +955,7 @@ function closeWorkbench() {
   state.selectedRow = null;
   state.selectedChat = null;
   state.chatPanel = "messages";
-  const pane = document.getElementById("detailPane");
+  const pane = detailPane();
   pane.replaceChildren();
   const box = el("div", "empty-state");
   box.append(el("p", "eyebrow", "selected chat"));
@@ -957,7 +964,7 @@ function closeWorkbench() {
 }
 
 function renderChat(payload, row) {
-  const pane = document.getElementById("detailPane");
+  const pane = detailPane();
   pane.replaceChildren();
   pane.classList.remove("tray-zap");
   void pane.offsetHeight;
@@ -992,6 +999,8 @@ function renderChat(payload, row) {
   contextPane.append(renderContactBox(payload, row), renderContextBox(payload, row));
   const messagesPane = el("section", "chat-pane messages-pane");
   workspace.append(contextPane, messagesPane);
+
+  messagesPane.append(renderCommunicationControls(payload, row));
 
   if (row.draft_uuid && row.proposed_text && row.draft_status !== "outbox" && row.draft_status !== "sent") {
     messagesPane.append(renderDraftBox(row));
@@ -1224,8 +1233,8 @@ function renderMissingDraftBox(row) {
   const reason = textarea("No-reply reason", "Handled elsewhere or no reply needed.", "short-textarea");
   box.append(reason.label);
   const actions = el("div", "draft-actions two");
-  const request = el("button", "", "Draft");
-  const noReply = el("button", "", "No reply");
+  const request = el("button", "", "Draft with AI");
+  const noReply = el("button", "", "Deny / no reply");
   request.type = "button";
   noReply.type = "button";
   request.addEventListener("click", () => runAction(request, () => requestDraft(row)));
@@ -1244,10 +1253,10 @@ function renderDraftBox(row) {
   const rejectReason = textarea("Reject reason", "Not the right reply.", "short-textarea");
   box.append(rejectReason.label);
   const actions = el("div", "draft-actions");
-  const approve = el("button", "", "Approve");
+  const approve = el("button", "", "Approve & queue");
   const save = el("button", "", "Save");
   const archive = el("button", "", "Archive");
-  const reject = el("button", "", "Reject");
+  const reject = el("button", "", "Deny / no reply");
   [approve, save, archive, reject].forEach((button) => {
     button.type = "button";
     actions.append(button);
@@ -1257,6 +1266,41 @@ function renderDraftBox(row) {
   archive.addEventListener("click", () => runAction(archive, () => archiveDraft(row.draft_uuid)));
   reject.addEventListener("click", () => runAction(reject, () => rejectDraft(row.draft_uuid, rejectReason.input.value)));
   box.append(actions);
+  return box;
+}
+
+function renderCommunicationControls(payload, row) {
+  const context = payload.context || {};
+  const box = el("div", "communication-controls");
+  const heading = el("div", "communication-controls-copy");
+  heading.append(el("p", "eyebrow", "communication controls"));
+  heading.append(el(
+    "strong",
+    "",
+    `${text(row.channel || row.service, "iMessage")} · ${text(row.direction, "conversation")}`,
+  ));
+  const policy = Boolean(context.do_not_draft)
+    ? "AI drafting paused"
+    : (context.professional ? "Manual approval required" : "AI assistance available");
+  heading.append(el("span", "", policy));
+
+  const actions = el("div", "communication-control-actions");
+  const configure = el("button", "", "Configure");
+  configure.type = "button";
+  configure.addEventListener("click", () => switchChatPanel("context"));
+  const toggle = el("button", "", context.do_not_draft ? "Allow AI drafts" : "Pause AI drafts");
+  toggle.type = "button";
+  toggle.addEventListener("click", () => runAction(toggle, async () => {
+    const fields = { do_not_draft: !Boolean(context.do_not_draft) };
+    if (fields.do_not_draft) fields.auto_approve = false;
+    await api(`/api/chats/${row.chat_id}/context`, {
+      method: "POST",
+      body: JSON.stringify({ fields }),
+    });
+    await openChat(state.selectedRow);
+  }));
+  actions.append(configure, toggle);
+  box.append(heading, actions);
   return box;
 }
 
@@ -1316,14 +1360,18 @@ async function rejectDraft(uuid, reasoning) {
 }
 
 async function requestDraft(row) {
+  const body = row.latest_is_from_me
+    ? { chat_id: Number(row.chat_id) }
+    : { message_rowid: Number(row.message_rowid) };
   await api("/api/drafts/request", {
     method: "POST",
-    body: JSON.stringify({ message_rowid: Number(row.message_rowid) }),
+    body: JSON.stringify(body),
   });
   await loadOverview();
-  const pending = await api("/api/pending?limit=80");
-  const updated = pending.find((item) => Number(item.message_rowid) === Number(row.message_rowid));
-  if (updated) await openChat(updated);
+  if (state.activeView === "attention" || state.activeView === "recent") {
+    await loadList(state.activeView);
+  }
+  await openChat(row);
 }
 
 async function markNoReply(row, reasoning) {
@@ -1342,7 +1390,7 @@ async function refreshAfterMutation(message) {
   await loadOverview();
   if (state.activeView !== "overview") await loadList(state.activeView);
   closeWorkbench();
-  const pane = document.getElementById("detailPane");
+  const pane = detailPane();
   pane.replaceChildren();
   const box = el("div", "empty-state");
   box.append(el("p", "eyebrow", "done"));
@@ -1610,6 +1658,7 @@ document.getElementById("contactsNewButton").addEventListener("click", () => ope
 document.querySelectorAll(".rail-button").forEach((button) => {
   button.addEventListener("click", () => runAction(button, async () => {
     const view = button.dataset.view;
+    closeWorkbench();
     setActiveView(view);
     if (view === "overview") await loadOverview();
     if (["pending", "attention", "recent", "views", "issues"].includes(view)) await loadList(view);

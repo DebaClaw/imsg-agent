@@ -67,7 +67,12 @@ class ArchiveAgentWorker:
             )
         return processed
 
-    async def draft_archived_message(self, message: Message) -> Draft | None:
+    async def draft_archived_message(
+        self,
+        message: Message,
+        *,
+        operator_requested: bool = False,
+    ) -> Draft | None:
         if self._drafter is None:
             return None
         self._ensure_chat_context(message.chat_id, source_rowid=message.rowid)
@@ -76,7 +81,11 @@ class ArchiveAgentWorker:
             through_rowid=message.rowid,
             limit=self._history_limit,
         )
-        return await self._drafter.process_message(message, history_override=history)
+        return await self._drafter.process_message(
+            message,
+            history_override=history,
+            operator_requested=operator_requested,
+        )
 
     def _ensure_chat_context(self, chat_id: int, *, source_rowid: int) -> None:
         context, body = self._store.read_chat_context_document(chat_id)

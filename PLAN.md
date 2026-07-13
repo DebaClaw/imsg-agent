@@ -1,6 +1,6 @@
 # PLAN.md — imsg-agent Architecture & Design
 
-Last updated: 2026-05-02
+Last updated: 2026-07-12
 
 ---
 
@@ -230,6 +230,40 @@ messages). The AI drafter receives both as context.
 - `pyyaml` — frontmatter parsing
 - `aiofiles` — async file I/O
 - `python-dotenv` — config from `.env`
+
+---
+
+### ADR-008: Conversation Workbench — Channel-Aware, Approval-Safe
+
+**Decision:** Operator views such as Recent and Attention select a conversation and open one
+shared workbench. A summary row identifies the channel, direction, latest communication, and
+reply-artifact state; the workbench joins that summary to the isolated conversation context,
+transcript, and approval actions.
+
+The current adapter is iMessage/SMS through `imsg rpc`. Future email, Slack, news/info, and other
+digital inputs should map into the same operator concepts without pretending every channel can be
+sent through the iMessage sender.
+
+**Operator use cases:**
+
+| Intent | Workbench behavior | Safety boundary |
+|---|---|---|
+| View | Open the latest item and transcript from Recent or Attention | Read only the selected conversation |
+| Draft | Request an AI proposal when none exists, including an explicit follow-up after an outbound message | Use only that conversation's context and history; leave the result unapproved |
+| Edit | Change proposed text and save it for later review | Saving never approves or sends |
+| Approve | Commit reviewed text to delivery | Queue the existing Markdown outbox artifact; never call a provider directly from the UI |
+| Deny | Record that no response should be sent | Preserve the rejected draft and no-reply rationale |
+| Archive | Remove a stale proposal from the active queue | Preserve a non-destructive archive artifact |
+| Prevent | Pause AI drafting for a conversation | Set `do_not_draft: true` and disable auto-approval |
+| Block | Mark an unwanted sender as ignored/spam | Preserve the local decision and prevent engagement; provider-level blocking is a future adapter capability |
+| Configure | Edit identity, relationship, tone, professional status, model, recipients, and approval policy | Professional and unknown-professional conversations always require manual approval |
+| Send/manage | Observe queued, sent, and failed states | Provider delivery remains downstream of outbox and must archive before send |
+
+**Extension boundary:** A future communication adapter should provide normalized conversation and
+item reads plus explicit capabilities such as `can_reply`, `can_block`, or `can_archive`. Provider
+actions belong behind their adapter; conversation context, AI assistance, policy evaluation, and
+approval artifacts remain channel-independent. Unsupported actions must be visibly unavailable,
+not silently simulated.
 
 ---
 

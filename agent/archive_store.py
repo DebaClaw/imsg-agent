@@ -749,6 +749,13 @@ class IMessageArchive:
                 COUNT(m.rowid) AS messages,
                 MAX(m.date) AS last_message_at,
                 (
+                    SELECT rowid
+                    FROM messages latest
+                    WHERE latest.chat_id = c.id
+                    ORDER BY latest.date DESC, latest.rowid DESC
+                    LIMIT 1
+                ) AS message_rowid,
+                (
                     SELECT sender
                     FROM messages latest
                     WHERE latest.chat_id = c.id
@@ -762,6 +769,20 @@ class IMessageArchive:
                     ORDER BY latest.date DESC, latest.rowid DESC
                     LIMIT 1
                 ) AS last_text,
+                (
+                    SELECT is_from_me
+                    FROM messages latest
+                    WHERE latest.chat_id = c.id
+                    ORDER BY latest.date DESC, latest.rowid DESC
+                    LIMIT 1
+                ) AS latest_is_from_me,
+                (
+                    SELECT is_reaction
+                    FROM messages latest
+                    WHERE latest.chat_id = c.id
+                    ORDER BY latest.date DESC, latest.rowid DESC
+                    LIMIT 1
+                ) AS latest_is_reaction,
                 (
                     SELECT GROUP_CONCAT(full_name, ', ')
                     FROM (
@@ -791,12 +812,15 @@ class IMessageArchive:
                 c.id AS chat_id,
                 c.name AS name,
                 c.identifier AS identifier,
+                c.service AS service,
                 c.is_group AS is_group,
                 latest.rowid AS message_rowid,
                 latest.sender AS sender,
                 latest.date AS last_message_at,
                 latest.text AS last_text,
                 latest.has_attachments AS has_attachments,
+                latest.is_from_me AS latest_is_from_me,
+                latest.is_reaction AS latest_is_reaction,
                 (
                     SELECT COUNT(*)
                     FROM messages count_messages

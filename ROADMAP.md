@@ -337,6 +337,17 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ⬜ "Do the needful" workflow that produces reviewable actions, drafts, and rationale
 - ⬜ Policy gates for autonomous action by relationship, chat type, and professional status
 
+#### Conversation Workbench and Communication Actions
+- ✅ Make Recent and Attention rows open a visible selected-conversation workbench
+- ✅ Join latest communication rows to proposed, queued, sent, failed, archived, and no-reply state
+- ✅ Show the latest transcript item and existing proposed response when selected
+- ✅ Offer AI-assisted drafting when no proposal exists, including explicit outbound follow-ups
+- ✅ Keep operator-requested follow-ups unapproved and conversation-context isolated
+- ✅ Expose edit, approve-and-queue, deny/no-reply, archive, pause, and configure controls
+- ✅ Model channel and direction in the workbench so new communication adapters can extend it
+- ⬜ Add provider adapters and explicit capability flags for email, Slack, and other digital inputs
+- ⬜ Add provider-level block/archive operations where a channel supports them
+
 ---
 
 ## Ongoing / Cross-cutting

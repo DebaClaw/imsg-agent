@@ -122,6 +122,45 @@ def test_web_chat_returns_context_and_messages(tmp_path: Path) -> None:
     assert payload["context"]["relationship"] == "close friend"
     assert payload["notes"] == "Met through the hiking group."
     assert payload["messages"][0]["text"] == "Can you help with this?"
+    assert payload["reply"]["message_rowid"] == 100
+    assert payload["reply"]["draft_status"] == "missing"
+    assert payload["reply"]["direction"] == "inbound"
+
+
+def test_web_recent_and_attention_include_reply_workflow_state(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    MessageStore(tmp_path).write_draft(_draft())
+
+    service = _service(tmp_path)
+    recent = service.recent(limit=5)
+    attention = service.attention(limit=5)
+
+    for row in (recent[0], attention[0]):
+        assert row["message_rowid"] == 100
+        assert row["draft_status"] == "draft_unapproved"
+        assert row["proposed_text"] == "Yep, I can help with that."
+        assert row["channel"] == "iMessage"
+        assert row["direction"] == "inbound"
+        assert row["can_request_draft"] is True
+
+
+def test_web_recent_exposes_outbound_latest_message_for_follow_up(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    outbound = _message(rowid=101)
+    outbound.is_from_me = True
+    outbound.sender = "me"
+    outbound.text = "Just checking in."
+    outbound.date = NOW.replace(hour=13)
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.upsert_message(outbound)
+
+    row = _service(tmp_path).recent(limit=5)[0]
+
+    assert row["message_rowid"] == 101
+    assert row["last_text"] == "Just checking in."
+    assert row["latest_is_from_me"] == 1
+    assert row["direction"] == "outbound"
+    assert row["draft_status"] == "missing"
 
 
 def test_web_edit_draft_keeps_it_unapproved(tmp_path: Path) -> None:

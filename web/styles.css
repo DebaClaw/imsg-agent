@@ -332,6 +332,15 @@ h3 {
   grid-column: 1 / -1;
 }
 
+body.chat-selected #listView .list-panel {
+  grid-column: 1;
+}
+
+body.chat-selected #listView .detail {
+  grid-column: 2;
+  grid-row: 1;
+}
+
 .panel-heading {
   display: flex;
   min-height: 72px;
@@ -883,6 +892,46 @@ body.chat-selected .detail {
   border: 1px solid rgba(248, 244, 236, 0.25);
   border-radius: 8px;
   background: rgba(248, 244, 236, 0.06);
+}
+
+.communication-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(248, 244, 236, 0.25);
+  border-radius: 8px;
+  background: rgba(248, 244, 236, 0.06);
+}
+
+.communication-controls-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.communication-controls-copy .eyebrow {
+  margin: 0;
+}
+
+.communication-controls-copy span {
+  color: rgba(248, 244, 236, 0.68);
+  font-size: 12px;
+}
+
+.communication-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.communication-control-actions button {
+  min-height: 34px;
+  border: 1px solid rgba(248, 244, 236, 0.45);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--paper);
 }
 
 .draft-box textarea {
@@ -1446,6 +1495,11 @@ button:disabled {
   body.chat-selected .detail {
     grid-column: 1;
     grid-row: 1;
+  }
+
+  body.chat-selected #listView .list-panel,
+  body.chat-selected #listView .detail {
+    grid-column: 1;
   }
 
   .workbench {

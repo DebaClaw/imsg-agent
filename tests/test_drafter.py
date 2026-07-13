@@ -261,6 +261,40 @@ async def test_existing_draft_for_source_prevents_duplicate(tmp_path: Path) -> N
     assert len(client.calls) == 1
 
 
+@pytest.mark.asyncio
+async def test_operator_requested_follow_up_can_draft_after_outbound_message(
+    tmp_path: Path,
+) -> None:
+    store = MessageStore(tmp_path)
+    _seed_chat(store, auto_approve=True, professional=False)
+    client = FakeDraftingClient()
+
+    draft = await Drafter(store, client, now=NOW).process_message(
+        _msg(text="Checking in.", is_from_me=True),
+        operator_requested=True,
+    )
+
+    assert draft is not None
+    assert draft.approved is False
+    assert draft.auto_approved is False
+    assert "OPERATOR REQUESTED A FOLLOW-UP" in client.calls[0]["input_text"]
+
+
+@pytest.mark.asyncio
+async def test_operator_requested_follow_up_respects_chat_drafting_block(tmp_path: Path) -> None:
+    store = MessageStore(tmp_path)
+    _seed_chat(store, do_not_draft=True)
+    client = FakeDraftingClient()
+
+    draft = await Drafter(store, client, now=NOW).process_message(
+        _msg(is_from_me=True),
+        operator_requested=True,
+    )
+
+    assert draft is None
+    assert client.calls == []
+
+
 def test_parse_model_json() -> None:
     parsed = _parse_model_json(
         '{"should_reply": true, "proposed_text": "Sounds good", '

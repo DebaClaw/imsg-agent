@@ -37,7 +37,7 @@ from .manage_cli import (
     service_stop,
 )
 from .models import Draft, Message
-from .pending_report import _decorate_pending_row, pending_replies
+from .pending_report import _decorate_pending_row, pending_replies, reply_artifact_index
 from .store import MessageStore
 
 JSON = dict[str, Any]
@@ -210,11 +210,17 @@ class OperatorService:
 
     def attention(self, *, limit: int = 50) -> JSONList:
         with IMessageArchive(self.db_path) as archive:
-            return archive.attention_items(limit=limit)
+            return self._communication_rows(
+                archive.attention_items(limit=limit),
+                MessageStore(self.data_dir),
+            )
 
     def recent(self, *, limit: int = 50) -> JSONList:
         with IMessageArchive(self.db_path) as archive:
-            return archive.recent_chats(limit=limit)
+            return self._communication_rows(
+                archive.recent_chats(limit=limit),
+                MessageStore(self.data_dir),
+            )
 
     def needs_reply(self, *, limit: int = 50) -> JSONList:
         with IMessageArchive(self.db_path) as archive:
@@ -297,6 +303,22 @@ class OperatorService:
         context, notes = store.read_chat_context_document(chat_id)
         review, review_notes = store.read_contact_review(chat_id)
         recipients = self._recipient_participants(seed.get("participants") or [])
+        latest = messages[-1] if messages else None
+        reply = self._communication_rows(
+            [
+                {
+                    "chat_id": chat_id,
+                    "message_rowid": latest.get("message_rowid"),
+                    "last_message_at": latest.get("message_at"),
+                    "last_text": latest.get("text"),
+                    "latest_is_from_me": latest.get("is_from_me"),
+                    "service": seed.get("service"),
+                }
+            ]
+            if latest is not None
+            else [],
+            store,
+        )
         return {
             "chat": seed,
             "recipients": recipients,
@@ -308,6 +330,7 @@ class OperatorService:
             "contacts": contacts,
             "contact_review": review,
             "contact_review_notes": review_notes,
+            "reply": reply[0] if reply else {},
         }
 
     def contacts(self, *, limit: int = 50, query: str = "") -> JSONList:
@@ -745,10 +768,10 @@ class OperatorService:
             )
             if message is None:
                 raise OperatorServiceError(HTTPStatus.NOT_FOUND, "No target message found")
-            if chat_id is not None and (message.is_from_me or message.is_reaction):
+            if message.is_reaction:
                 raise OperatorServiceError(
                     HTTPStatus.CONFLICT,
-                    "Latest message is not an inbound reply target",
+                    "Latest message is a reaction and cannot anchor a reply draft",
                 )
             store = MessageStore(self.data_dir)
             drafter = Drafter(
@@ -764,7 +787,12 @@ class OperatorService:
                 drafter=drafter,
                 history_limit=self.config.chat_context_messages,
             )
-            draft = asyncio.run(worker.draft_archived_message(message))
+            draft = asyncio.run(
+                worker.draft_archived_message(
+                    message,
+                    operator_requested=bool(chat_id is not None and message.is_from_me),
+                )
+            )
             return self._draft_result(store, message=message, draft=draft)
 
     def logs(self, service: str, *, errors: bool = False, lines: int = 80) -> JSON:
@@ -842,6 +870,20 @@ class OperatorService:
             if len(rows) >= limit:
                 break
         return rows
+
+    def _communication_rows(self, rows: JSONList, store: MessageStore) -> JSONList:
+        """Decorate communication summaries with their reviewable reply state."""
+        artifacts = reply_artifact_index(store)
+        decorated: JSONList = []
+        for source in rows:
+            row = _decorate_pending_row(source, store, artifacts=artifacts)
+            row["channel"] = str(row.get("service") or "iMessage")
+            row["direction"] = "outbound" if bool(row.get("latest_is_from_me")) else "inbound"
+            row["can_request_draft"] = bool(row.get("message_rowid")) and not bool(
+                row.get("latest_is_reaction")
+            )
+            decorated.append(row)
+        return decorated
 
     def _orbit_rows(
         self,
