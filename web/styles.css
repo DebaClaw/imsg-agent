@@ -1085,6 +1085,37 @@ body.chat-selected .detail {
   background: var(--panel);
 }
 
+.research-result {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.research-result h3,
+.research-result p {
+  margin: 0;
+}
+
+.research-facts {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.research-sources {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.research-sources a {
+  color: var(--cobalt);
+}
+
 .field textarea {
   min-height: 112px;
   resize: vertical;

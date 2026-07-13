@@ -19,6 +19,7 @@ from uuid import uuid4
 
 from .archive_agent import ArchiveAgentWorker
 from .archive_store import ArchiveRow, IMessageArchive
+from .business_research import BusinessResearchError, OpenAIBusinessResearcher
 from .config import Config
 from .contact_enrichment import (
     contacts_from_json,
@@ -364,6 +365,26 @@ class OperatorService:
             synced = archive.replace_contacts(contacts)
             enriched = archive.enrich_chat_contacts()
         return {"status": "synced", **asdict(synced), "matches": asdict(enriched)}
+
+    def research_business_contact(self, *, name: str, location: str) -> JSON:
+        name = name.strip()
+        location = location.strip()
+        if not name:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "Business name is required")
+        if not location:
+            raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "Location is required")
+        if not self.config.openai_api_key:
+            raise OperatorServiceError(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "OPENAI_API_KEY is required for business research",
+            )
+        try:
+            return OpenAIBusinessResearcher(
+                api_key=self.config.openai_api_key,
+                model=self.config.draft_model,
+            ).research(name=name, location=location)
+        except BusinessResearchError as exc:
+            raise OperatorServiceError(HTTPStatus.BAD_GATEWAY, str(exc)) from exc
 
     def create_contact(self, fields: JSON) -> JSON:
         full_name = str(fields.get("fullName") or "").strip()

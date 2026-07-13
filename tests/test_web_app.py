@@ -427,6 +427,40 @@ def test_web_contacts_page_filters_substrings_and_pages_results(tmp_path: Path) 
     assert substring["items"][0]["full_name"] == "Jon Doe"
 
 
+def test_web_business_research_requires_api_key(tmp_path: Path) -> None:
+    with pytest.raises(WebAPIError, match="OPENAI_API_KEY") as error:
+        _service(tmp_path).research_business_contact(
+            name="Northwind Coffee",
+            location="Seattle, WA",
+        )
+
+    assert error.value.status == 503
+
+
+def test_web_business_research_returns_review_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeResearcher:
+        def __init__(self, *, api_key: str, model: str) -> None:
+            assert api_key == "test-key"
+            assert model == "gpt-5.5"
+
+        def research(self, *, name: str, location: str) -> dict[str, object]:
+            return {"business_name": name, "location": location, "candidate": {"fullName": name}}
+
+    monkeypatch.setattr("agent.operator_service.OpenAIBusinessResearcher", FakeResearcher)
+    service = WebService(
+        config=_config(tmp_path, openai_api_key="test-key"),
+        data_dir=tmp_path,
+        db_path=tmp_path / "imessage.sqlite",
+    )
+
+    result = service.research_business_contact(name="Northwind Coffee", location="Seattle, WA")
+
+    assert result["candidate"] == {"fullName": "Northwind Coffee"}
+
+
 def test_web_chat_accepts_a_before_cursor(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
     later = _message(rowid=101)

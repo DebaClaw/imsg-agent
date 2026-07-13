@@ -185,6 +185,11 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
             )
         if parts == ["api", "contacts", "sync"]:
             return service.sync_contacts()
+        if parts == ["api", "contacts", "research"]:
+            return service.research_business_contact(
+                name=_payload_str(payload, "name"),
+                location=_payload_str(payload, "location"),
+            )
         if parts == ["api", "contacts", "link"]:
             return service.link_contact(
                 chat_id=_payload_int(payload, "chat_id"),

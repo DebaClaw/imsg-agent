@@ -774,18 +774,18 @@ async function openContact(contactId) {
   list.append(panel);
 }
 
-function openNewContact() {
+function openNewContact(seed = {}) {
   const list = document.getElementById("contactsList");
   list.replaceChildren();
   const panel = el("section", "contact-detail");
   panel.append(el("p", "eyebrow", "new contact"));
   panel.append(el("h2", "", "Create in contacts-mcp"));
-  const name = input("Full name", "");
-  const organization = input("Organization", "");
-  const email = input("Email", "");
-  const phone = input("Phone", "");
-  const categories = input("Categories (comma separated)", "");
-  const notes = textarea("Notes", "", "short-textarea");
+  const name = input("Full name", text(seed.fullName));
+  const organization = input("Organization", text(seed.organization?.name));
+  const email = input("Email", text(seed.emails?.[0]?.value));
+  const phone = input("Phone", text(seed.phones?.[0]?.value));
+  const categories = input("Categories (comma separated)", (seed.categories || []).join(", "));
+  const notes = textarea("Notes", text(seed.notes), "short-textarea");
   const create = el("button", "inline-action", "Create contact");
   create.type = "button";
   create.addEventListener("click", () => runAction(create, async () => {
@@ -797,6 +797,66 @@ function openNewContact() {
   }));
   panel.append(name.label, organization.label, email.label, phone.label, categories.label, notes.label, create);
   list.append(panel);
+}
+
+function openBusinessResearch() {
+  const list = document.getElementById("contactsList");
+  list.replaceChildren();
+  const panel = el("section", "contact-detail business-research");
+  panel.append(el("p", "eyebrow", "public business research"));
+  panel.append(el("h2", "", "Find a business contact"));
+  const name = input("Business name", "");
+  const location = input("Location", "");
+  const result = el("div", "research-result hidden");
+  const research = el("button", "inline-action", "Research business");
+  research.type = "button";
+  research.addEventListener("click", () => runAction(research, async () => {
+    const payload = await api("/api/contacts/research", {
+      method: "POST",
+      body: JSON.stringify({ name: name.input.value, location: location.input.value }),
+    });
+    renderBusinessResearch(result, payload);
+  }));
+  panel.append(name.label, location.label, research, result);
+  list.append(panel);
+}
+
+function renderBusinessResearch(container, result) {
+  container.classList.remove("hidden");
+  container.replaceChildren();
+  container.append(el("p", "eyebrow", "research candidate"));
+  container.append(el("h3", "", text(result.business_name)));
+  if (result.location) container.append(el("p", "", text(result.location)));
+  if (result.summary) container.append(el("p", "", text(result.summary)));
+  const facts = el("div", "research-facts");
+  if (result.phone) {
+    facts.append(el("p", "", `Phone: ${text(result.phone)} (${text(result.phone_status, "candidate")})`));
+    if (result.phone_normalized) facts.append(el("p", "", `Normalized: ${text(result.phone_normalized)}`));
+  }
+  if (result.email) facts.append(el("p", "", `Email: ${text(result.email)}`));
+  if (result.address) facts.append(el("p", "", `Address: ${text(result.address)}`));
+  if (result.website) facts.append(el("p", "", `Website: ${text(result.website)}`));
+  facts.append(el("p", "", `Confidence: ${text(result.confidence, "0")}/100`));
+  container.append(facts);
+  const sources = result.sources || [];
+  if (sources.length) {
+    const sourceList = el("ul", "research-sources");
+    sources.forEach((source) => {
+      const item = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = text(source.url);
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.textContent = text(source.title, source.url);
+      item.append(link);
+      sourceList.append(item);
+    });
+    container.append(sourceList);
+  }
+  const useCandidate = el("button", "inline-action", "Use candidate in new contact");
+  useCandidate.type = "button";
+  useCandidate.addEventListener("click", () => openNewContact(result.candidate || {}));
+  container.append(useCandidate);
 }
 
 function contactFields(name, organization, email, phone, categories, notes) {
@@ -1504,6 +1564,7 @@ document.getElementById("contactsSearchForm").addEventListener("submit", (event)
   event.preventDefault();
   runAction(event.submitter, () => loadContacts(document.getElementById("contactsSearchInput").value.trim(), 0));
 });
+document.getElementById("contactsResearchButton").addEventListener("click", openBusinessResearch);
 document.getElementById("contactsSyncButton").addEventListener("click", (event) => {
   runAction(event.currentTarget, async () => {
     await api("/api/contacts/sync", { method: "POST" });

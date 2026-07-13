@@ -287,6 +287,12 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Use skin-aware colors for forms and contact controls outside the dark conversation pane
   - ✅ Verify labels and input text remain readable in the Country skin
 
+#### Business Contact Discovery
+- ✅ **Review-first business research**
+  - ✅ Research a public business by name and location with cited sources
+  - ✅ Normalize discovered phone numbers and report their evidence status
+  - ✅ Let the operator review and explicitly create a contact from a research candidate
+
 #### Orbit Relationship Ranking and Exploration
 - ✅ **Relationship-aware Orbit ranking**
   - ✅ Add a local per-contact importance override
