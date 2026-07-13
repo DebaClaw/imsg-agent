@@ -408,6 +408,23 @@ class MessageStore:
             logger.warning("Failed to read contact review for %d: %s", chat_id, exc)
             return {}, ""
 
+    def ignored_spam_chat_ids(self) -> set[int]:
+        """Return chats explicitly marked as spam by the local operator review."""
+        reviews_dir = self._root / "contact_reviews"
+        if not reviews_dir.exists():
+            return set()
+        chat_ids: set[int] = set()
+        for path in reviews_dir.glob("*.md"):
+            try:
+                meta, _ = _parse_frontmatter(path.read_text(encoding="utf-8"))
+                chat_id = int(str(meta.get("chat_id") or ""))
+            except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
+                logger.warning("Failed to read contact review %s: %s", path, exc)
+                continue
+            if meta.get("decision") == "ignore_spam":
+                chat_ids.add(chat_id)
+        return chat_ids
+
     def write_contact_candidate(self, *, chat_id: int, name: str, identifier: str) -> Path:
         """Prepare, but never import, a vCard candidate for explicit operator review."""
         escaped_name = name.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")

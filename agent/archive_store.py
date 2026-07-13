@@ -847,6 +847,7 @@ class IMessageArchive:
         offset: int = 0,
         direction: str = "incoming",
         since: str | None = None,
+        exclude_chat_ids: set[int] | None = None,
     ) -> ArchiveRow:
         if direction not in {"incoming", "outgoing", "either"}:
             raise ValueError("Unknown Orbit direction")
@@ -856,6 +857,10 @@ class IMessageArchive:
             where.append("latest.is_from_me = 0")
         elif direction == "outgoing":
             where.append("latest.is_from_me = 1")
+        if exclude_chat_ids:
+            placeholders = ", ".join("?" for _ in exclude_chat_ids)
+            where.append(f"c.id NOT IN ({placeholders})")
+            params.extend(sorted(exclude_chat_ids))
         if since:
             where.append("latest.date >= ?")
             params.append(since)

@@ -75,6 +75,7 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
                 offset=_query_optional_int(query, "offset") or 0,
                 direction=_query_str(query, "direction", "incoming"),
                 days=7 if days is None else days,
+                include_spam=_query_optional_bool(query, "include_spam") or False,
             )
         if parts == ["api", "changes"]:
             return service.changes(since=_query_str(query, "since", ""))

@@ -96,6 +96,7 @@ class OperatorService:
         offset: int = 0,
         direction: str = "incoming",
         days: int = 7,
+        include_spam: bool = False,
     ) -> JSON:
         if limit < 1 or limit > 32:
             raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "limit must be 1 to 32")
@@ -106,16 +107,23 @@ class OperatorService:
         if days not in {0, 1, 7, 30, 90}:
             raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "days must be 0, 1, 7, 30, or 90")
         since = (datetime.now(UTC) - timedelta(days=days)).isoformat() if days else None
+        store = MessageStore(self.data_dir)
         with IMessageArchive(self.db_path) as archive:
             page = archive.orbit_threads(
                 limit=limit,
                 offset=offset,
                 direction=direction,
                 since=since,
+                exclude_chat_ids=None if include_spam else store.ignored_spam_chat_ids(),
             )
-        store = MessageStore(self.data_dir)
         items = self._orbit_rows(cast(JSONList, page["items"]), [], store, limit=limit)
-        return {**page, "items": items, "direction": direction, "days": days}
+        return {
+            **page,
+            "items": items,
+            "direction": direction,
+            "days": days,
+            "include_spam": include_spam,
+        }
 
     def pending(
         self,

@@ -12,6 +12,7 @@ const state = {
   contactsOffset: 0,
   orbitDirection: "incoming",
   orbitDays: 7,
+  orbitIncludeSpam: false,
   orbitOffset: 0,
   orbitPage: null,
 };
@@ -609,7 +610,7 @@ async function loadOverview() {
 async function loadOrbit(reset = false) {
   if (reset) state.orbitOffset = 0;
   const page = await api(
-    `/api/orbit?limit=16&offset=${state.orbitOffset}&direction=${encodeURIComponent(state.orbitDirection)}&days=${state.orbitDays}`,
+    `/api/orbit?limit=16&offset=${state.orbitOffset}&direction=${encodeURIComponent(state.orbitDirection)}&days=${state.orbitDays}&include_spam=${state.orbitIncludeSpam}`,
   );
   state.orbitPage = page;
   renderOrbit(page.items || [], state.operator || {});
@@ -1443,6 +1444,11 @@ document.querySelectorAll("[data-orbit-direction]").forEach((button) => {
 });
 document.getElementById("orbitWindow").addEventListener("change", (event) => {
   state.orbitDays = Number(event.currentTarget.value);
+  state.orbitOffset = 0;
+  loadOrbit().catch((error) => showError(error.message));
+});
+document.getElementById("orbitSpamToggle").addEventListener("change", (event) => {
+  state.orbitIncludeSpam = event.currentTarget.checked;
   state.orbitOffset = 0;
   loadOrbit().catch((error) => showError(error.message));
 });

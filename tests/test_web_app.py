@@ -316,6 +316,47 @@ def test_web_contact_review_stays_local_and_can_prepare_a_vcard(tmp_path: Path) 
     assert "BEGIN:VCARD" in candidate.read_text(encoding="utf-8")
 
 
+def test_web_orbit_hides_ignored_spam_until_requested(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.upsert_chat(
+            Chat(
+                id=8,
+                identifier="iMessage;-;+18015550102",
+                name="Sam",
+                service="iMessage",
+                last_message_at=NOW,
+                participants=["+18015550102"],
+            )
+        )
+        archive.upsert_message(
+            Message(
+                rowid=101,
+                chat_id=8,
+                guid="GUID-101",
+                sender="+18015550102",
+                text="Hello from Sam",
+                date=NOW,
+                is_from_me=False,
+                service="iMessage",
+                has_attachments=False,
+                chat_name="Sam",
+                participants=["+18015550102"],
+            )
+        )
+
+    service = _service(tmp_path)
+    service.review_contact(chat_id=7, decision="ignore_spam")
+
+    hidden = service.orbit(direction="incoming", days=0)
+    included = service.orbit(direction="incoming", days=0, include_spam=True)
+
+    assert hidden["total"] == 1
+    assert [row["chat_id"] for row in hidden["items"]] == [8]
+    assert included["total"] == 2
+    assert {row["chat_id"] for row in included["items"]} == {7, 8}
+
+
 def test_web_ignore_spam_fills_blank_context_and_blocks_drafting(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
     MessageStore(tmp_path).write_chat_context(

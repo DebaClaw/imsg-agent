@@ -265,6 +265,11 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Turn an Ignore / spam review into a visible, non-engagement context policy
   - ✅ Preserve existing operator context while filling blank policy guidance
 
+#### Spam Visibility
+- ✅ **Orbit spam filtering**
+  - ✅ Hide locally reviewed spam from the default Orbit before pagination
+  - ✅ Add an explicit Orbit toggle for reviewing hidden spam
+
 #### Settings and Large Lists
 - ✅ **Global settings workspace**
   - ✅ Make the persistent Operator control open a full Settings workspace from every view
