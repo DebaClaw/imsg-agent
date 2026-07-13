@@ -289,6 +289,8 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Document the macOS launchctl restart path and script entrypoints
 - ✅ **LaunchAgent restart reliability**
   - ✅ Restart loaded services with kickstart and allow enough time for macOS teardown
+- ✅ **Archive readiness**
+  - ✅ Add an admin backfill command and diagnostic so a healthy monitor cannot leave Orbit empty
 
 #### AI Action Layer
 - ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor

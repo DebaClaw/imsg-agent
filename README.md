@@ -74,6 +74,7 @@ scripts/setup.sh  Environment and data-directory setup
 scripts/install_launchd.sh  Install a user LaunchAgent for archive monitoring
 scripts/install_agent_worker_launchd.sh  Install archive-backed AI worker service
 scripts/imsg-admin  Start, stop, restart, inspect, and read logs for local services
+scripts/imsg-archive  Backfill and inspect the local SQLite archive
 tests/            Unit tests with fixtures, no live Messages database required
 ```
 
@@ -240,6 +241,14 @@ Restart a loaded LaunchAgent directly with:
 launchctl kickstart -k gui/$(id -u)/com.imsg-agent.archive-monitor
 ```
 
+The monitor only captures messages that arrive after it starts. Populate existing history
+before expecting Orbit to show conversations:
+
+```bash
+scripts/imsg-archive backfill
+scripts/imsg-archive stats
+```
+
 ## Archive-Backed AI Worker
 
 The recommended service split is:
@@ -309,6 +318,7 @@ monitor, AI worker, and web GUI:
 scripts/imsg-monitor restart
 scripts/imsg-worker restart
 scripts/imsg-web restart
+scripts/imsg-archive backfill
 scripts/imsg-admin all status
 scripts/imsg-admin worker logs --errors --lines 120
 scripts/imsg-admin web logs --lines 120

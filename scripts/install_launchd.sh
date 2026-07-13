@@ -125,6 +125,9 @@ launchctl bootstrap "gui/$UID_VALUE" "$PLIST_PATH"
 launchctl enable "gui/$UID_VALUE/$LABEL"
 launchctl kickstart -k "gui/$UID_VALUE/$LABEL"
 
+echo "Archive monitor installed. It receives new messages only."
+echo "Run scripts/imsg-archive backfill once to populate existing history for Orbit."
+
 cat <<EOF
 Installed and started $LABEL
 
