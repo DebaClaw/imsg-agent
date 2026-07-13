@@ -298,6 +298,11 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Track the active Contacts editor in the web UI
   - ✅ Push its fields to contacts-mcp before refreshing the local Contacts archive
 
+#### Business Contact Identity
+- ✅ **Name organization-only contact cards**
+  - ✅ Replace the source placeholder `Unknown` with structured or organization identity during sync
+  - ✅ Preserve business names in linked conversation and Contacts displays
+
 #### Orbit Relationship Ranking and Exploration
 - ✅ **Relationship-aware Orbit ranking**
   - ✅ Add a local per-contact importance override

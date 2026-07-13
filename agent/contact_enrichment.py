@@ -111,10 +111,11 @@ def contacts_from_json(
         categories_raw = raw.get("categories")
         categories: list[Any] = categories_raw if isinstance(categories_raw, list) else []
         points = contact_points_from_contact(raw, default_country)
+        full_name = _contact_display_name(raw, name, organization)
         records.append(
             ContactRecord(
                 contact_id=contact_id,
-                full_name=str(raw.get("fullName") or ""),
+                full_name=full_name,
                 given_name=str(name.get("givenName") or ""),
                 family_name=str(name.get("familyName") or ""),
                 organization_name=str(organization.get("name") or ""),
@@ -128,6 +129,26 @@ def contacts_from_json(
             )
         )
     return records
+
+
+def _contact_display_name(
+    raw: dict[str, Any],
+    name: dict[str, Any],
+    organization: dict[str, Any],
+) -> str:
+    """Avoid showing the provider's `Unknown` placeholder for business cards."""
+    full_name = str(raw.get("fullName") or "").strip()
+    if full_name and full_name.casefold() != "unknown":
+        return full_name
+    structured = " ".join(
+        str(name.get(field) or "").strip()
+        for field in ("givenName", "middleName", "familyName")
+        if str(name.get(field) or "").strip()
+    )
+    if structured:
+        return structured
+    organization_name = str(organization.get("name") or "").strip()
+    return organization_name or full_name
 
 
 def contact_photo_data_uri(contact: dict[str, Any], metadata: dict[str, Any]) -> str:

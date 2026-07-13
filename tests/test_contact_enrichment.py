@@ -55,6 +55,21 @@ def test_contacts_from_json_extracts_points() -> None:
     ]
 
 
+def test_contacts_from_json_uses_business_name_for_unknown_provider_card() -> None:
+    records = contacts_from_json(
+        [
+            {
+                "id": "business-1",
+                "fullName": "Unknown",
+                "organization": {"name": "SimonMed Imaging"},
+                "phones": [],
+            }
+        ]
+    )
+
+    assert records[0].full_name == "SimonMed Imaging"
+
+
 def test_contacts_from_json_preserves_a_contact_photo() -> None:
     records = contacts_from_json(
         [{"id": "contact-1", "fullName": "Alex", "photo": "aGVsbG8="}]
