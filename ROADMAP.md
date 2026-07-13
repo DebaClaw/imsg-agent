@@ -282,6 +282,11 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Replace the limited native contact select with a searchable, paginated picker
   - ✅ Match any name or organization substring in the context workspace
 
+#### Theme Accessibility
+- ✅ **Country form contrast**
+  - ✅ Use skin-aware colors for forms and contact controls outside the dark conversation pane
+  - ✅ Verify labels and input text remain readable in the Country skin
+
 #### Orbit Relationship Ranking and Exploration
 - ✅ **Relationship-aware Orbit ranking**
   - ✅ Add a local per-contact importance override
