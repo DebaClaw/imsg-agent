@@ -267,6 +267,29 @@ not silently simulated.
 
 ---
 
+### ADR-009: Layered Relationship Context
+
+**Decision:** Relationship management is composed from four explicit, user-editable layers:
+
+1. operator defaults for self-presentation, interpretation style, values, tone, and boundaries;
+2. reusable profiles for contacts explicitly matched or linked to the selected chat;
+3. an optional group profile for group purpose, dynamics, tone, boundaries, and policy; and
+4. the conversation's own `context.md`, which is the most specific layer.
+
+Group profiles inherit linked member profiles by default and can opt out with
+`inherit_member_profiles: false`. Ambiguous contact matches are never included in drafting
+context. Inherited `professional: true` prevents autonomous approval, and inherited
+`do_not_draft: true` prevents drafting. The effective context is visible through the shared
+service layer, local API, CLI, and selected-conversation web workspace.
+
+**Storage:** Operator defaults stay in `operator.md`; reusable contact profiles live under
+`relationships/contacts/` using hashed filenames; group profiles live under
+`relationships/groups/{chat_id}.md`; conversation overrides remain in
+`chats/{chat_id}/context.md`. Contact and group profile notes are Markdown bodies so the full
+system stays locally inspectable and editable.
+
+---
+
 ## Module Responsibilities
 
 ### `rpc_client.py`

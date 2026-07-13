@@ -894,6 +894,27 @@ body.chat-selected .detail {
   background: rgba(248, 244, 236, 0.06);
 }
 
+.relationship-profile-box,
+.group-relationship-editor {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px dashed rgba(248, 244, 236, 0.35);
+  border-radius: 8px;
+  background: rgba(248, 244, 236, 0.04);
+}
+
+.contact-detail > .relationship-profile-box {
+  border-color: var(--line);
+  background: var(--panel-strong);
+}
+
+.contact-detail > .relationship-profile-box .field,
+.contact-detail > .relationship-profile-box .check-field {
+  color: var(--muted);
+}
+
 .communication-controls {
   display: flex;
   align-items: center;

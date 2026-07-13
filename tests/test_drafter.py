@@ -295,6 +295,55 @@ async def test_operator_requested_follow_up_respects_chat_drafting_block(tmp_pat
     assert client.calls == []
 
 
+@pytest.mark.asyncio
+async def test_drafter_uses_effective_member_and_group_relationship_context(
+    tmp_path: Path,
+) -> None:
+    store = MessageStore(tmp_path)
+    _seed_chat(store, do_not_draft=False)
+    client = FakeDraftingClient()
+    relationship_context = {
+        "operator": {"self_presentation": "calm and candid"},
+        "members": [
+            {
+                "contact_id": "alex",
+                "profile": {"interpretation": "dry humor is affectionate"},
+            }
+        ],
+        "group": {"tone": "light", "purpose": "weekend planning"},
+        "conversation": store.read_chat_context(7),
+        "safety": {"professional": False, "do_not_draft": False},
+    }
+
+    draft = await Drafter(store, client, now=NOW).process_message(
+        _msg(),
+        relationship_context_override=relationship_context,
+    )
+
+    assert draft is not None
+    prompt = client.calls[0]["input_text"]
+    assert "EFFECTIVE RELATIONSHIP CONTEXT" in prompt
+    assert "dry humor is affectionate" in prompt
+    assert "weekend planning" in prompt
+
+
+@pytest.mark.asyncio
+async def test_inherited_contact_block_prevents_drafting(tmp_path: Path) -> None:
+    store = MessageStore(tmp_path)
+    _seed_chat(store, do_not_draft=False)
+    client = FakeDraftingClient()
+
+    draft = await Drafter(store, client, now=NOW).process_message(
+        _msg(),
+        relationship_context_override={
+            "safety": {"do_not_draft": True, "professional": False}
+        },
+    )
+
+    assert draft is None
+    assert client.calls == []
+
+
 def test_parse_model_json() -> None:
     parsed = _parse_model_json(
         '{"should_reply": true, "proposed_text": "Sounds good", '

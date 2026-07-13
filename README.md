@@ -300,6 +300,12 @@ uv run imsg-agentctl recent --limit 25
 uv run imsg-agentctl search "coffee saturday" --limit 25
 uv run imsg-agentctl unresolved --limit 50
 uv run imsg-agentctl attachment-issues --limit 50
+uv run imsg-agentctl relationship operator
+uv run imsg-agentctl relationship operator --set 'default_tone=warm and direct'
+uv run imsg-agentctl relationship contact CONTACT_ID --set 'relationship=close friend'
+uv run imsg-agentctl relationship group 742 --set 'purpose=family planning' \
+  --set 'inherit_member_profiles=true'
+uv run imsg-agentctl relationship effective 742 --json
 ```
 
 Service helpers wrap the two LaunchAgents installed by the setup scripts:
@@ -370,6 +376,26 @@ in `~/imsg-data/operator.md`; set an optional local `vcard_path` there (or in th
 panel) to use the vCard photo at the center of the Orbit. Queue preferences live in
 `~/imsg-data/observatory.md`, default to the most recent seven days, and support global
 relationship-type filtering, grouping, archived-draft visibility, and older-history review.
+
+Relationship guidance is layered and editable from Settings, Contacts, and the selected
+conversation Context pane. Operator defaults control how the operator wants to present themselves
+and interpret communications generally. Each synced contact can have a reusable relationship
+profile. Group chats add a group profile and, by default, inherit only profiles for contacts that
+are explicitly matched or manually linked to that chat. Conversation context is most specific and
+wins when guidance conflicts. Ambiguous contacts are excluded from AI context.
+
+The same relationship surface is available from the local API:
+
+```text
+GET/POST /api/relationships/operator
+GET/POST /api/relationships/contacts/{contact_id}
+GET/POST /api/relationships/groups/{chat_id}
+GET      /api/relationships/chats/{chat_id}
+```
+
+Contact profiles are stored under `~/imsg-data/relationships/contacts/`; group profiles are under
+`~/imsg-data/relationships/groups/`. Inherited professional context disables autonomous approval,
+and inherited do-not-draft policy stops AI drafting.
 
 Archiving a draft moves its Markdown artifact to `~/imsg-data/draft_archive/`; it never
 deletes the draft. Contact review decisions stay local in `~/imsg-data/contact_reviews/`.

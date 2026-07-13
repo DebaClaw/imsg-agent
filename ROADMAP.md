@@ -348,6 +348,16 @@ interfaces and AI workflows on top without making the archive depend on AI.
 - ⬜ Add provider adapters and explicit capability flags for email, Slack, and other digital inputs
 - ⬜ Add provider-level block/archive operations where a channel supports them
 
+#### Relationship Management Layer
+- ✅ Add operator-wide self-presentation, interpretation, values, tone, and boundary settings
+- ✅ Add reusable per-contact relationship profiles with private notes and safety policy
+- ✅ Add group purpose, dynamics, tone, presentation, interpretation, boundaries, and policy
+- ✅ Let group chats inherit profiles only from explicitly matched or linked members
+- ✅ Make group member inheritance configurable while excluding ambiguous/unrelated contacts
+- ✅ Compose and expose deterministic effective context with conversation overrides highest
+- ✅ Apply inherited professional and do-not-draft safety signals in the drafter
+- ✅ Make operator, contact, group, and effective context editable/viewable in web, API, and CLI
+
 ---
 
 ## Ongoing / Cross-cutting

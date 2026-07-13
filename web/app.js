@@ -756,6 +756,19 @@ async function openContact(contactId) {
   state.contactEditor = editor;
   setContactsSyncLabel(true);
   panel.append(name.label, organization.label, email.label, phone.label, categories.label, importance.label, notes.label);
+  panel.append(renderRelationshipProfileEditor({
+    title: "Relationship profile",
+    profile: contact.relationship_profile || {},
+    notes: contact.relationship_notes || "",
+    saveLabel: "Save relationship profile",
+    onSave: async (fields, relationshipNotes) => {
+      await api(`/api/relationships/contacts/${encodeURIComponent(contactId)}`, {
+        method: "POST",
+        body: JSON.stringify({ fields, notes: relationshipNotes }),
+      });
+      await openContact(contactId);
+    },
+  }));
   const points = el("div", "contact-points");
   (contact.points || []).forEach((point) => points.append(el("p", "", `${point.kind}: ${point.original_value || point.value}`)));
   panel.append(points);
@@ -1183,6 +1196,10 @@ function renderContextBox(payload, row) {
 
   const relationship = input("Relationship", context.relationship || "");
   const tone = input("Tone", context.tone || "");
+  const selfPresentation = textarea("How I want to present myself", context.self_presentation || "", "short-textarea");
+  const interpretation = textarea("How to interpret them here", context.interpretation || "", "short-textarea");
+  const communicationPreferences = textarea("Communication preferences", context.communication_preferences || "", "short-textarea");
+  const boundaries = textarea("Boundaries", context.boundaries || "", "short-textarea");
   const name = input("Conversation name", context.name || text(payload.chat && payload.chat.name));
   const participants = input("Recipients (me excluded)", (payload.recipients || context.participants || []).join(", "));
   const model = input("Draft model", context.model || "");
@@ -1193,7 +1210,18 @@ function renderContextBox(payload, row) {
   const favorite = checkbox("Favorite", Boolean(context.favorite));
   const notes = textarea("Notes", payload.notes || "", "context-notes");
 
-  box.append(name.label, participants.label, relationship.label, tone.label, model.label, agentNotes.label);
+  box.append(
+    name.label,
+    participants.label,
+    relationship.label,
+    tone.label,
+    selfPresentation.label,
+    interpretation.label,
+    communicationPreferences.label,
+    boundaries.label,
+    model.label,
+    agentNotes.label,
+  );
   const toggles = el("div", "toggle-row");
   toggles.append(professional.label, autoApprove.label, doNotDraft.label, favorite.label);
   box.append(toggles, notes.label);
@@ -1207,6 +1235,10 @@ function renderContextBox(payload, row) {
         fields: {
           relationship: relationship.input.value,
           tone: tone.input.value,
+          self_presentation: selfPresentation.input.value,
+          interpretation: interpretation.input.value,
+          communication_preferences: communicationPreferences.input.value,
+          boundaries: boundaries.input.value,
           name: name.input.value,
           participants: participants.input.value.split(",").map((item) => item.trim()).filter(Boolean),
           model: model.input.value || null,
@@ -1223,7 +1255,104 @@ function renderContextBox(payload, row) {
     await openChat(state.selectedRow);
   }));
   box.append(save);
+  if (Boolean(payload.chat?.is_group || context.is_group)) {
+    box.append(renderGroupRelationshipEditor(payload, row));
+  }
   return box;
+}
+
+function renderRelationshipProfileEditor({ title, profile = {}, notes = "", saveLabel, onSave }) {
+  const box = el("section", "relationship-profile-box");
+  box.append(el("p", "eyebrow", title));
+  const relationship = input("Relationship", text(profile.relationship));
+  const tone = input("Tone", text(profile.tone));
+  const selfPresentation = textarea("How I want to present myself", text(profile.self_presentation), "short-textarea");
+  const interpretation = textarea("How to interpret them", text(profile.interpretation), "short-textarea");
+  const communicationPreferences = textarea("Communication preferences", text(profile.communication_preferences), "short-textarea");
+  const boundaries = textarea("Boundaries", text(profile.boundaries), "short-textarea");
+  const agentNotes = textarea("Agent guidance", text(profile.agent_notes), "short-textarea");
+  const professional = checkbox("Professional", Boolean(profile.professional));
+  const doNotDraft = checkbox("Never draft", Boolean(profile.do_not_draft));
+  const notesField = textarea("Private relationship notes", text(notes), "context-notes");
+  box.append(
+    relationship.label,
+    tone.label,
+    selfPresentation.label,
+    interpretation.label,
+    communicationPreferences.label,
+    boundaries.label,
+    agentNotes.label,
+  );
+  const toggles = el("div", "toggle-row");
+  toggles.append(professional.label, doNotDraft.label);
+  box.append(toggles, notesField.label);
+  const save = el("button", "inline-action", saveLabel);
+  save.type = "button";
+  save.addEventListener("click", () => runAction(save, () => onSave({
+    relationship: relationship.input.value,
+    tone: tone.input.value,
+    self_presentation: selfPresentation.input.value,
+    interpretation: interpretation.input.value,
+    communication_preferences: communicationPreferences.input.value,
+    boundaries: boundaries.input.value,
+    agent_notes: agentNotes.input.value,
+    professional: professional.input.checked,
+    do_not_draft: doNotDraft.input.checked,
+  }, notesField.input.value)));
+  box.append(save);
+  return box;
+}
+
+function renderGroupRelationshipEditor(payload, row) {
+  const group = payload.group_profile || {};
+  const container = el("section", "group-relationship-editor");
+  container.append(el("p", "eyebrow", "group relationship profile"));
+  container.append(el("h3", "", "Group dynamics and inherited member context"));
+  const name = input("Group profile name", text(group.name, text(payload.chat?.name)));
+  const purpose = textarea("Purpose", text(group.purpose), "short-textarea");
+  const dynamics = textarea("Group dynamics", text(group.dynamics), "short-textarea");
+  const inherit = checkbox("Include linked member profiles", group.inherit_member_profiles !== false);
+  container.append(name.label, purpose.label, dynamics.label, inherit.label);
+  container.append(renderRelationshipProfileEditor({
+    title: "Group-wide guidance",
+    profile: group,
+    notes: text(payload.relationship_context?.group_notes),
+    saveLabel: "Save group profile",
+    onSave: async (fields, notes) => {
+      await api(`/api/relationships/groups/${row.chat_id}`, {
+        method: "POST",
+        body: JSON.stringify({ fields: {
+          ...fields,
+          name: name.input.value,
+          purpose: purpose.input.value,
+          dynamics: dynamics.input.value,
+          inherit_member_profiles: inherit.input.checked,
+        }, notes }),
+      });
+      await openChat(row);
+    },
+  }));
+  const members = payload.member_profiles || [];
+  if (!members.length) {
+    container.append(el("p", "empty-state compact", "No linked member relationship profiles yet."));
+  } else {
+    members.forEach((member) => {
+      container.append(renderRelationshipProfileEditor({
+        title: `Member · ${text(member.name, member.contact_id)}`,
+        profile: member.profile || {},
+        notes: member.notes || "",
+        saveLabel: "Save member profile",
+        onSave: async (fields, notes) => {
+          await api(`/api/relationships/contacts/${encodeURIComponent(member.contact_id)}`, {
+            method: "POST",
+            body: JSON.stringify({ fields, notes }),
+          });
+          await openChat(row);
+        },
+      }));
+    });
+  }
+  return container;
 }
 
 function renderMissingDraftBox(row) {
@@ -1418,6 +1547,12 @@ async function renderSettings() {
   const name = input("Name", text(identity.name, text(profile.name, "Me")));
   const aliases = input("My addresses and handles (comma separated)", (identity.aliases || profile.aliases || []).join(", "));
   const vcard = input("vCard photo fallback", text(profile.vcard_path));
+  const defaultTone = input("Default tone", text(profile.default_tone));
+  const selfPresentation = textarea("How I want to present myself", text(profile.self_presentation), "short-textarea");
+  const interpretationStyle = textarea("How I want communications interpreted", text(profile.interpretation_style), "short-textarea");
+  const communicationValues = textarea("Communication values", text(profile.communication_values), "short-textarea");
+  const boundaries = textarea("Global boundaries", text(profile.boundaries), "short-textarea");
+  const relationshipNotes = textarea("Relationship-management notes", text(profile.relationship_notes), "context-notes");
   const picker = el("div", "contact-picker");
   const filter = input("Filter contact cards", "");
   filter.input.placeholder = "Type any part of a name or organization";
@@ -1494,13 +1629,32 @@ async function renderSettings() {
         vcard_path: vcard.input.value,
         contact_id: selectedContactId,
         aliases: aliases.input.value.split(",").map((item) => item.trim()).filter(Boolean),
+        default_tone: defaultTone.input.value,
+        self_presentation: selfPresentation.input.value,
+        interpretation_style: interpretationStyle.input.value,
+        communication_values: communicationValues.input.value,
+        boundaries: boundaries.input.value,
+        relationship_notes: relationshipNotes.input.value,
       } }),
     });
     await loadOverview();
     await renderSettings();
   }));
   picker.append(filter.label, contactLabel, pickerPager, pickerStatus);
-  identitySection.append(name.label, aliases.label, vcard.label, picker, card, saveIdentity);
+  identitySection.append(
+    name.label,
+    aliases.label,
+    vcard.label,
+    picker,
+    card,
+    defaultTone.label,
+    selfPresentation.label,
+    interpretationStyle.label,
+    communicationValues.label,
+    boundaries.label,
+    relationshipNotes.label,
+    saveIdentity,
+  );
 
   const queueSection = el("section", "settings-section");
   queueSection.append(el("p", "eyebrow", "queue rules"), el("h2", "", "Pending drafts"));

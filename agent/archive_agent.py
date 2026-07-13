@@ -26,6 +26,7 @@ from .drafter import (
     OpenAIResponsesDraftingClient,
 )
 from .models import Draft, Message
+from .relationships import effective_relationship_context
 from .rpc_client import IMsgRPCClient
 from .sender import ApprovalScanner, Sender
 from .store import MessageStore
@@ -81,10 +82,16 @@ class ArchiveAgentWorker:
             through_rowid=message.rowid,
             limit=self._history_limit,
         )
+        relationship_context = effective_relationship_context(
+            store=self._store,
+            archive=self._archive,
+            chat_id=message.chat_id,
+        )
         return await self._drafter.process_message(
             message,
             history_override=history,
             operator_requested=operator_requested,
+            relationship_context_override=relationship_context,
         )
 
     def _ensure_chat_context(self, chat_id: int, *, source_rowid: int) -> None:

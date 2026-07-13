@@ -188,6 +188,41 @@ class TestChatContext:
         assert "Best friend" in body
 
 
+class TestRelationshipProfiles:
+    def test_contact_relationship_roundtrip_uses_safe_hashed_path(self, tmp_path: Path) -> None:
+        store = MessageStore(tmp_path)
+        contact_id = "contact/with/slashes"
+
+        store.write_contact_relationship(
+            contact_id,
+            {"relationship": "close friend", "tone": "warm"},
+            notes="Met in college.",
+        )
+        profile, notes = store.read_contact_relationship_document(contact_id)
+
+        assert profile["contact_id"] == contact_id
+        assert profile["relationship"] == "close friend"
+        assert notes == "Met in college."
+        paths = list((tmp_path / "relationships" / "contacts").glob("*.md"))
+        assert len(paths) == 1
+        assert "/" not in paths[0].name
+
+    def test_group_relationship_roundtrip(self, tmp_path: Path) -> None:
+        store = MessageStore(tmp_path)
+
+        store.write_group_relationship(
+            7,
+            {"purpose": "family planning", "inherit_member_profiles": True},
+            notes="Keep logistics calm.",
+        )
+        profile, notes = store.read_group_relationship_document(7)
+
+        assert profile["chat_id"] == 7
+        assert profile["purpose"] == "family planning"
+        assert profile["inherit_member_profiles"] is True
+        assert notes == "Keep logistics calm."
+
+
 # ---------------------------------------------------------------------------
 # Chat history
 # ---------------------------------------------------------------------------

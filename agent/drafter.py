@@ -16,11 +16,12 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .models import Draft, Message
+from .relationships import OPERATOR_RELATIONSHIP_FIELDS
 from .store import MessageStore
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "draft_v1"
+PROMPT_VERSION = "draft_v2_relationships"
 DEFAULT_MODEL = "gpt-5.5"
 
 
@@ -139,12 +140,31 @@ class Drafter:
         *,
         history_override: str | None = None,
         operator_requested: bool = False,
+        relationship_context_override: dict[str, Any] | None = None,
     ) -> Draft | None:
         context, context_body = self._store.read_chat_context_document(message.chat_id)
         history = (
             history_override
             if history_override is not None
             else self._store.read_chat_history(message.chat_id)
+        )
+        relationship_context = relationship_context_override or {
+            "operator": {
+                key: value
+                for key, value in self._store.read_operator_profile().items()
+                if key in OPERATOR_RELATIONSHIP_FIELDS and value not in (None, "", [])
+            },
+            "members": [],
+            "group": self._store.read_group_relationship(message.chat_id),
+            "conversation": context,
+            "conversation_notes": context_body,
+            "safety": {},
+        }
+        inherited_safety = relationship_context.get("safety")
+        inherited_block = bool(
+            inherited_safety.get("do_not_draft")
+            if isinstance(inherited_safety, dict)
+            else False
         )
 
         if self._store.draft_exists_for_source(message.chat_id, message.rowid):
@@ -163,7 +183,7 @@ class Drafter:
         if not message.text.strip() and not message.has_attachments:
             logger.debug("Skipping rowid=%d; no text or attachments to respond to", message.rowid)
             return None
-        if bool(context.get("do_not_draft")):
+        if bool(context.get("do_not_draft")) or inherited_block:
             logger.info(
                 "Skipping rowid=%d chat_id=%d; do_not_draft=true",
                 message.rowid,
@@ -186,7 +206,11 @@ class Drafter:
             return None
 
         model = str(context.get("model") or self._default_model)
-        auto_approved = False if operator_requested else self._should_auto_approve(context)
+        auto_approved = (
+            False
+            if operator_requested
+            else self._should_auto_approve(context, relationship_context=relationship_context)
+        )
         created_at = self._current_time()
         draft_uuid = f"{created_at.strftime('%Y%m%dT%H%M%SZ')}-{message.rowid}"
 
@@ -200,6 +224,7 @@ class Drafter:
                 new_message_text=message.text,
                 source_rowid=message.rowid,
                 operator_requested=operator_requested,
+                relationship_context=relationship_context,
             ),
         )
         if not response.should_reply:
@@ -261,6 +286,7 @@ class Drafter:
         new_message_text: str,
         source_rowid: int,
         operator_requested: bool = False,
+        relationship_context: dict[str, Any] | None = None,
     ) -> str:
         structured_context = {
             key: context.get(key)
@@ -271,6 +297,10 @@ class Drafter:
                 "participants",
                 "relationship",
                 "tone",
+                "self_presentation",
+                "interpretation",
+                "communication_preferences",
+                "boundaries",
                 "professional",
                 "auto_approve",
                 "do_not_draft",
@@ -283,6 +313,12 @@ class Drafter:
                 "CHAT CONTEXT FRONTMATTER\n"
                 + json.dumps(structured_context, ensure_ascii=False, sort_keys=True),
                 "CHAT CONTEXT NOTES\n" + (context_body.strip() or "(none)"),
+                "EFFECTIVE RELATIONSHIP CONTEXT\n"
+                + json.dumps(
+                    relationship_context or {},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
                 "CURRENT TIME\n" + self._current_time().isoformat().replace("+00:00", "Z"),
                 "RECENT CHAT HISTORY\n" + (history.strip() or "(none)"),
                 (
@@ -301,10 +337,25 @@ class Drafter:
             ]
         )
 
-    def _should_auto_approve(self, context: dict[str, Any]) -> bool:
+    def _should_auto_approve(
+        self,
+        context: dict[str, Any],
+        *,
+        relationship_context: dict[str, Any] | None = None,
+    ) -> bool:
         requested = bool(context.get("auto_approve", self._auto_approve_default))
         # Unknown professional status is treated as professional for autonomous sends.
-        professional = context.get("professional") is not False
+        inherited_safety = (
+            relationship_context.get("safety")
+            if isinstance(relationship_context, dict)
+            else {}
+        )
+        inherited_professional = bool(
+            inherited_safety.get("professional")
+            if isinstance(inherited_safety, dict)
+            else False
+        )
+        professional = context.get("professional") is not False or inherited_professional
         return (
             requested
             and not professional

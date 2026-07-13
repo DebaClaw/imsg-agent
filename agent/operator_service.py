@@ -38,6 +38,13 @@ from .manage_cli import (
 )
 from .models import Draft, Message
 from .pending_report import _decorate_pending_row, pending_replies, reply_artifact_index
+from .relationships import (
+    GROUP_PROFILE_FIELDS,
+    OPERATOR_RELATIONSHIP_FIELDS,
+    PROFILE_FIELDS,
+    effective_relationship_context,
+    linked_member_relationships,
+)
 from .store import MessageStore
 
 JSON = dict[str, Any]
@@ -170,7 +177,15 @@ class OperatorService:
     def update_operator_profile(self, fields: JSON) -> JSON:
         store = MessageStore(self.data_dir)
         profile = store.read_operator_profile()
-        allowed = {"name", "display_name", "vcard_path", "contact_id", "aliases", "avatar_data_uri"}
+        allowed = {
+            "name",
+            "display_name",
+            "vcard_path",
+            "contact_id",
+            "aliases",
+            "avatar_data_uri",
+            *OPERATOR_RELATIONSHIP_FIELDS,
+        }
         for key, value in fields.items():
             if key in allowed:
                 profile[key] = value
@@ -178,6 +193,19 @@ class OperatorService:
                     profile["name"] = value
         store.write_operator_profile(profile)
         return {"status": "saved", "operator": self.operator_profile()}
+
+    def operator_relationship(self) -> JSON:
+        profile = MessageStore(self.data_dir).read_operator_profile()
+        return {
+            key: profile.get(key)
+            for key in sorted(OPERATOR_RELATIONSHIP_FIELDS)
+            if key in profile
+        }
+
+    def update_operator_relationship(self, fields: JSON) -> JSON:
+        return self.update_operator_profile(
+            {key: value for key, value in fields.items() if key in OPERATOR_RELATIONSHIP_FIELDS}
+        )
 
     def observatory_preferences(self) -> JSON:
         return MessageStore(self.data_dir).read_observatory_preferences()
@@ -319,6 +347,17 @@ class OperatorService:
             else [],
             store,
         )
+        with IMessageArchive(self.db_path) as relationship_archive:
+            relationship_context = effective_relationship_context(
+                store=store,
+                archive=relationship_archive,
+                chat_id=chat_id,
+            )
+            editable_member_profiles = linked_member_relationships(
+                store=store,
+                archive=relationship_archive,
+                chat_id=chat_id,
+            )
         return {
             "chat": seed,
             "recipients": recipients,
@@ -331,6 +370,9 @@ class OperatorService:
             "contact_review": review,
             "contact_review_notes": review_notes,
             "reply": reply[0] if reply else {},
+            "relationship_context": relationship_context,
+            "group_profile": relationship_context["group"],
+            "member_profiles": editable_member_profiles,
         }
 
     def contacts(self, *, limit: int = 50, query: str = "") -> JSONList:
@@ -361,7 +403,104 @@ class OperatorService:
             raise OperatorServiceError(HTTPStatus.NOT_FOUND, "Contact not found")
         importance = MessageStore(self.data_dir).read_contact_importance()
         detail["importance"] = importance.get(contact_id, 0)
+        relationship, notes = MessageStore(self.data_dir).read_contact_relationship_document(
+            contact_id
+        )
+        detail["relationship_profile"] = relationship
+        detail["relationship_notes"] = notes
         return detail
+
+    def contact_relationship(self, contact_id: str) -> JSON:
+        with IMessageArchive(self.db_path) as archive:
+            contact = archive.contact(contact_id)
+        if not contact:
+            raise OperatorServiceError(HTTPStatus.NOT_FOUND, "Contact not found")
+        profile, notes = MessageStore(self.data_dir).read_contact_relationship_document(contact_id)
+        return {
+            "contact_id": contact_id,
+            "contact": contact,
+            "profile": profile,
+            "notes": notes,
+        }
+
+    def update_contact_relationship(
+        self,
+        contact_id: str,
+        *,
+        fields: JSON,
+        notes: str | None = None,
+    ) -> JSON:
+        current = self.contact_relationship(contact_id)
+        profile = dict(cast(JSON, current["profile"]))
+        profile.update({key: value for key, value in fields.items() if key in PROFILE_FIELDS})
+        stored_notes = str(current["notes"]) if notes is None else notes
+        MessageStore(self.data_dir).write_contact_relationship(
+            contact_id,
+            profile,
+            notes=stored_notes,
+        )
+        return {"status": "saved", **self.contact_relationship(contact_id)}
+
+    def group_relationship(self, chat_id: int) -> JSON:
+        store = MessageStore(self.data_dir)
+        with IMessageArchive(self.db_path) as archive:
+            seed = archive.chat_context_seed(chat_id)
+            if not seed:
+                raise OperatorServiceError(HTTPStatus.NOT_FOUND, "Chat not found")
+            if not bool(seed.get("is_group")):
+                raise OperatorServiceError(HTTPStatus.BAD_REQUEST, "Chat is not a group")
+            effective = effective_relationship_context(
+                store=store,
+                archive=archive,
+                chat_id=chat_id,
+            )
+            members = linked_member_relationships(
+                store=store,
+                archive=archive,
+                chat_id=chat_id,
+            )
+        profile, notes = store.read_group_relationship_document(chat_id)
+        return {
+            "chat_id": chat_id,
+            "chat": seed,
+            "profile": profile,
+            "notes": notes,
+            "members": members,
+            "effective": effective,
+        }
+
+    def update_group_relationship(
+        self,
+        chat_id: int,
+        *,
+        fields: JSON,
+        notes: str | None = None,
+    ) -> JSON:
+        current = self.group_relationship(chat_id)
+        profile = dict(cast(JSON, current["profile"]))
+        allowed = {key: value for key, value in fields.items() if key in GROUP_PROFILE_FIELDS}
+        if "inherit_member_profiles" in allowed and not isinstance(
+            allowed["inherit_member_profiles"], bool
+        ):
+            raise OperatorServiceError(
+                HTTPStatus.BAD_REQUEST,
+                "inherit_member_profiles must be a boolean",
+            )
+        profile.update(allowed)
+        stored_notes = str(current["notes"]) if notes is None else notes
+        MessageStore(self.data_dir).write_group_relationship(
+            chat_id,
+            profile,
+            notes=stored_notes,
+        )
+        return {"status": "saved", **self.group_relationship(chat_id)}
+
+    def relationship_context(self, chat_id: int) -> JSON:
+        store = MessageStore(self.data_dir)
+        with IMessageArchive(self.db_path) as archive:
+            if not archive.chat_context_seed(chat_id):
+                raise OperatorServiceError(HTTPStatus.NOT_FOUND, "Chat not found")
+            return effective_relationship_context(store=store, archive=archive, chat_id=chat_id)
 
     def update_contact_importance(self, contact_id: str, importance: int) -> JSON:
         if importance < 0 or importance > 5:
@@ -506,6 +645,10 @@ class OperatorService:
         allowed = {
             "relationship",
             "tone",
+            "self_presentation",
+            "interpretation",
+            "communication_preferences",
+            "boundaries",
             "professional",
             "auto_approve",
             "do_not_draft",

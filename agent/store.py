@@ -21,6 +21,7 @@ Directory layout:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -179,6 +180,70 @@ class MessageStore:
         except Exception as exc:
             logger.warning("Failed to read %s: %s", path, exc)
             return {}
+
+    # ------------------------------------------------------------------
+    # Relationship profiles
+    # ------------------------------------------------------------------
+
+    def _contact_relationship_path(self, contact_id: str) -> Path:
+        digest = hashlib.sha256(contact_id.encode("utf-8")).hexdigest()[:24]
+        return self._root / "relationships" / "contacts" / f"{digest}.md"
+
+    def read_contact_relationship_document(
+        self,
+        contact_id: str,
+    ) -> tuple[dict[str, Any], str]:
+        path = self._contact_relationship_path(contact_id)
+        if not path.exists():
+            return {}, ""
+        try:
+            meta, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
+            if str(meta.get("contact_id") or "") != contact_id:
+                return {}, ""
+            return meta, body
+        except Exception as exc:
+            logger.warning("Failed to read contact relationship %s: %s", contact_id, exc)
+            return {}, ""
+
+    def write_contact_relationship(
+        self,
+        contact_id: str,
+        profile: dict[str, Any],
+        *,
+        notes: str = "",
+    ) -> None:
+        meta = {**profile, "contact_id": contact_id}
+        _atomic_write(
+            self._contact_relationship_path(contact_id),
+            _write_frontmatter(meta, notes),
+        )
+
+    def read_group_relationship_document(self, chat_id: int) -> tuple[dict[str, Any], str]:
+        path = self._root / "relationships" / "groups" / f"{chat_id}.md"
+        if not path.exists():
+            return {}, ""
+        try:
+            return _parse_frontmatter(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Failed to read group relationship %d: %s", chat_id, exc)
+            return {}, ""
+
+    def read_group_relationship(self, chat_id: int) -> dict[str, Any]:
+        profile, _ = self.read_group_relationship_document(chat_id)
+        return profile
+
+    def write_group_relationship(
+        self,
+        chat_id: int,
+        profile: dict[str, Any],
+        *,
+        notes: str = "",
+    ) -> None:
+        meta = {**profile, "chat_id": chat_id}
+        _atomic_write(
+            self._root / "relationships" / "groups" / f"{chat_id}.md",
+            _write_frontmatter(meta, notes),
+        )
 
     # ------------------------------------------------------------------
     # Inbox

@@ -233,6 +233,8 @@ def test_archive_records_ambiguous_and_unresolved_contact_matches(tmp_path: Path
     assert result.unresolved == 1
     assert archive.count_chat_contact_matches("ambiguous") == 2
     assert archive.count_chat_contact_matches("unresolved") == 1
+    assert len(archive.chat_contacts(7)) == 2
+    assert archive.confirmed_chat_contacts(7) == []
     archive.close()
 
 

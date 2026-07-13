@@ -341,6 +341,65 @@ def run_logs(args: argparse.Namespace) -> None:
         print(line)
 
 
+def _relationship_field_values(values: list[str]) -> JSON:
+    fields: JSON = {}
+    for item in values:
+        if "=" not in item:
+            raise SystemExit(f"relationship field must be key=value: {item}")
+        key, raw = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise SystemExit("relationship field name is required")
+        try:
+            value: object = json.loads(raw)
+        except json.JSONDecodeError:
+            value = raw
+        fields[key] = value
+    return fields
+
+
+def run_relationship(args: argparse.Namespace) -> None:
+    from .operator_service import OperatorService
+
+    config = load_config()
+    service = OperatorService(
+        config=config,
+        data_dir=_data_dir(args, config),
+        db_path=_db_path(args, config),
+    )
+    fields = _relationship_field_values(args.fields)
+    notes = getattr(args, "notes", None)
+    if args.relationship_scope == "operator":
+        payload = (
+            service.update_operator_relationship(fields)
+            if fields
+            else service.operator_relationship()
+        )
+    elif args.relationship_scope == "contact":
+        payload = (
+            service.update_contact_relationship(
+                args.contact_id,
+                fields=fields,
+                notes=notes,
+            )
+            if fields or notes is not None
+            else service.contact_relationship(args.contact_id)
+        )
+    elif args.relationship_scope == "group":
+        payload = (
+            service.update_group_relationship(
+                args.chat_id,
+                fields=fields,
+                notes=notes,
+            )
+            if fields or notes is not None
+            else service.group_relationship(args.chat_id)
+        )
+    else:
+        payload = service.relationship_context(args.chat_id)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+
+
 def service_status(service: str) -> JSON:
     label = service_label(service)
     plist = plist_path(label)
@@ -659,6 +718,39 @@ def _parser() -> argparse.ArgumentParser:
     logs.add_argument("--data-dir", help="Data dir. Defaults to configured ~/imsg-data")
     logs.add_argument("--json", action="store_true", dest="json_output")
 
+    relationship = subparsers.add_parser(
+        "relationship",
+        help="View or edit operator, contact, group, and effective relationship context",
+    )
+    relationship_subparsers = relationship.add_subparsers(
+        dest="relationship_scope",
+        required=True,
+    )
+    operator_relationship = relationship_subparsers.add_parser("operator")
+    contact_relationship = relationship_subparsers.add_parser("contact")
+    contact_relationship.add_argument("contact_id")
+    group_relationship = relationship_subparsers.add_parser("group")
+    group_relationship.add_argument("chat_id", type=int)
+    effective_relationship = relationship_subparsers.add_parser("effective")
+    effective_relationship.add_argument("chat_id", type=int)
+    for relationship_parser in (
+        operator_relationship,
+        contact_relationship,
+        group_relationship,
+        effective_relationship,
+    ):
+        _add_data_options(relationship_parser)
+        relationship_parser.add_argument(
+            "--set",
+            action="append",
+            default=[],
+            dest="fields",
+            metavar="KEY=VALUE",
+            help="Set a relationship field; JSON booleans and numbers are accepted",
+        )
+    contact_relationship.add_argument("--notes")
+    group_relationship.add_argument("--notes")
+
     return parser
 
 
@@ -689,6 +781,8 @@ def cli() -> None:
         run_service(args)
     elif args.command == "logs":
         run_logs(args)
+    elif args.command == "relationship":
+        run_relationship(args)
 
 
 if __name__ == "__main__":

@@ -1127,6 +1127,28 @@ class IMessageArchive:
         ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
+    def confirmed_chat_contacts(self, chat_id: int) -> list[ArchiveRow]:
+        """Return only matched or explicitly linked contacts safe for prompt context."""
+        rows = self._db.execute(
+            """
+            SELECT DISTINCT contacts.contact_id, contacts.full_name,
+                contacts.organization_name, contacts.organization_title,
+                contacts.notes, contacts.categories_json, contacts.photo_data_uri,
+                CASE WHEN manual.contact_id IS NULL THEN 0 ELSE 1 END AS manual
+            FROM contacts
+            LEFT JOIN chat_contact_matches matches
+                ON matches.contact_id = contacts.contact_id
+                AND matches.chat_id = ?
+                AND matches.status = 'matched'
+            LEFT JOIN manual_contact_links manual
+                ON manual.contact_id = contacts.contact_id AND manual.chat_id = ?
+            WHERE matches.contact_id IS NOT NULL OR manual.contact_id IS NOT NULL
+            ORDER BY manual DESC, contacts.full_name COLLATE NOCASE
+            """,
+            (chat_id, chat_id),
+        ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
     def link_chat_contact(self, chat_id: int, contact_id: str) -> None:
         if self._db.execute("SELECT 1 FROM chats WHERE id = ?", (chat_id,)).fetchone() is None:
             raise ValueError("Chat not found")

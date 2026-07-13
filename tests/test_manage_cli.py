@@ -11,6 +11,7 @@ from agent.archive_store import IMessageArchive
 from agent.drafter import DraftResponse
 from agent.manage_cli import (
     _parser,
+    _relationship_field_values,
     log_path,
     run_draft,
     run_logs,
@@ -75,6 +76,20 @@ def test_manage_cli_accepts_operator_commands() -> None:
     search = _parser().parse_args(["search", "coffee", "--chat-id", "7"])
     service = _parser().parse_args(["service", "restart", "worker"])
     logs = _parser().parse_args(["logs", "monitor", "--errors", "--lines", "20"])
+    relationship = _parser().parse_args(
+        [
+            "relationship",
+            "contact",
+            "contact-1",
+            "--set",
+            "tone=warm",
+            "--set",
+            "professional=false",
+            "--notes",
+            "Old friend",
+        ]
+    )
+    effective = _parser().parse_args(["relationship", "effective", "7", "--json"])
 
     assert pending.command == "pending"
     assert pending.limit == 5
@@ -93,6 +108,25 @@ def test_manage_cli_accepts_operator_commands() -> None:
     assert logs.command == "logs"
     assert logs.errors is True
     assert logs.lines == 20
+    assert relationship.command == "relationship"
+    assert relationship.relationship_scope == "contact"
+    assert relationship.contact_id == "contact-1"
+    assert relationship.fields == ["tone=warm", "professional=false"]
+    assert relationship.notes == "Old friend"
+    assert effective.relationship_scope == "effective"
+    assert effective.chat_id == 7
+
+
+def test_manage_cli_relationship_fields_parse_json_values() -> None:
+    fields = _relationship_field_values(
+        ["tone=warm", "professional=false", "inherit_member_profiles=true"]
+    )
+
+    assert fields == {
+        "tone": "warm",
+        "professional": False,
+        "inherit_member_profiles": True,
+    }
 
 
 def test_manage_pending_prints_matching_proposed_reply(

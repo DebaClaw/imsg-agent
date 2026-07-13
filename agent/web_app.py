@@ -81,6 +81,14 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
             return service.changes(since=_query_str(query, "since", ""))
         if parts == ["api", "operator"]:
             return service.operator_profile()
+        if parts == ["api", "relationships", "operator"]:
+            return service.operator_relationship()
+        if len(parts) == 4 and parts[:3] == ["api", "relationships", "contacts"]:
+            return service.contact_relationship(parts[3])
+        if len(parts) == 4 and parts[:3] == ["api", "relationships", "groups"]:
+            return service.group_relationship(int(parts[3]))
+        if len(parts) == 4 and parts[:3] == ["api", "relationships", "chats"]:
+            return service.relationship_context(int(parts[3]))
         if parts == ["api", "preferences"]:
             return service.observatory_preferences()
         if parts == ["api", "contacts"]:
@@ -175,6 +183,20 @@ class IMsgWebHandler(BaseHTTPRequestHandler):
             )
         if parts == ["api", "operator"]:
             return service.update_operator_profile(_payload_dict(payload, "fields"))
+        if parts == ["api", "relationships", "operator"]:
+            return service.update_operator_relationship(_payload_dict(payload, "fields"))
+        if len(parts) == 4 and parts[:3] == ["api", "relationships", "contacts"]:
+            return service.update_contact_relationship(
+                parts[3],
+                fields=_payload_dict(payload, "fields"),
+                notes=_optional_payload_str(payload, "notes"),
+            )
+        if len(parts) == 4 and parts[:3] == ["api", "relationships", "groups"]:
+            return service.update_group_relationship(
+                int(parts[3]),
+                fields=_payload_dict(payload, "fields"),
+                notes=_optional_payload_str(payload, "notes"),
+            )
         if parts == ["api", "preferences"]:
             return service.update_observatory_preferences(_payload_dict(payload, "fields"))
         if parts == ["api", "contacts", "review"]:

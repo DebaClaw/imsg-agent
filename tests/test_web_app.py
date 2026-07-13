@@ -705,3 +705,118 @@ def test_web_update_chat_context_preserves_notes_when_notes_omitted(tmp_path: Pa
     assert context["relationship"] == "friend"
     assert context["tone"] == "warmer"
     assert notes == "Keep this note."
+
+
+def test_web_operator_relationship_profile_is_editable(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+
+    payload = service.update_operator_relationship(
+        {
+            "default_tone": "warm and direct",
+            "self_presentation": "grounded and curious",
+            "interpretation_style": "assume good intent but notice ambiguity",
+            "communication_values": "clarity, care, and honest boundaries",
+            "boundaries": "do not invent commitments",
+        }
+    )
+
+    assert payload["operator"]["default_tone"] == "warm and direct"
+    assert service.operator_relationship()["self_presentation"] == "grounded and curious"
+
+
+def test_web_contact_relationship_profile_is_local_and_editable(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.replace_contacts(
+            contacts_from_json([{"id": "contact-1", "fullName": "Alex"}])
+        )
+
+    service = _service(tmp_path)
+    saved = service.update_contact_relationship(
+        "contact-1",
+        fields={
+            "relationship": "close friend",
+            "tone": "playful",
+            "self_presentation": "relaxed and present",
+            "interpretation": "brief replies are normal, not dismissive",
+            "professional": False,
+        },
+        notes="College roommate.",
+    )
+    contact = service.contact("contact-1")
+
+    assert saved["profile"]["relationship"] == "close friend"
+    assert saved["notes"] == "College roommate."
+    assert contact["relationship_profile"]["interpretation"].startswith("brief replies")
+    assert contact["relationship_notes"] == "College roommate."
+
+
+def test_web_group_profile_inherits_only_linked_member_profiles(tmp_path: Path) -> None:
+    group = _chat()
+    group.is_group = True
+    group.participants = ["+18015550101", "+18015550102"]
+    message = _message()
+    message.is_group = True
+    message.participants = list(group.participants)
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.upsert_chat(group)
+        archive.upsert_message(message)
+        archive.replace_contacts(
+            contacts_from_json(
+                [
+                    {"id": "contact-1", "fullName": "Alex"},
+                    {"id": "contact-2", "fullName": "Morgan"},
+                    {"id": "operator-contact", "fullName": "Debbie"},
+                    {"id": "outside", "fullName": "Outside Person"},
+                ]
+            )
+        )
+        archive.link_chat_contact(7, "contact-1")
+        archive.link_chat_contact(7, "contact-2")
+        archive.link_chat_contact(7, "operator-contact")
+
+    service = _service(tmp_path)
+    service.update_operator_profile({"contact_id": "operator-contact"})
+    service.update_contact_relationship(
+        "contact-1",
+        fields={"relationship": "sibling", "interpretation": "uses dry humor"},
+        notes="Family context.",
+    )
+    service.update_contact_relationship(
+        "contact-2",
+        fields={"relationship": "friend", "professional": True},
+    )
+    service.update_contact_relationship(
+        "outside",
+        fields={"relationship": "unrelated secret"},
+    )
+    saved = service.update_group_relationship(
+        7,
+        fields={
+            "name": "Weekend crew",
+            "purpose": "make plans without over-structuring",
+            "tone": "light",
+            "inherit_member_profiles": True,
+        },
+        notes="Alex and Morgan know each other well.",
+    )
+    effective = service.relationship_context(7)
+    chat = service.chat(7)
+
+    assert saved["profile"]["name"] == "Weekend crew"
+    assert [member["contact_id"] for member in effective["members"]] == [
+        "contact-1",
+        "contact-2",
+    ]
+    assert "outside" not in str(effective)
+    assert effective["safety"]["professional"] is True
+    assert chat["group_profile"]["purpose"].startswith("make plans")
+    assert len(chat["member_profiles"]) == 2
+
+    service.update_group_relationship(
+        7,
+        fields={"inherit_member_profiles": False},
+    )
+    assert service.relationship_context(7)["members"] == []
+    assert len(service.group_relationship(7)["members"]) == 2
+    assert len(service.chat(7)["member_profiles"]) == 2
