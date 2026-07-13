@@ -277,6 +277,29 @@ def test_web_operator_identity_excludes_me_from_context_recipients(tmp_path: Pat
     assert context["participants"] == [recipient]
 
 
+def test_web_hides_operator_contact_from_orbit_and_chat_contacts(tmp_path: Path) -> None:
+    _seed_archive(tmp_path)
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.replace_contacts(
+            contacts_from_json(
+                [
+                    {"id": "operator-contact", "fullName": "Debbie"},
+                    {"id": "alex-contact", "fullName": "Alex"},
+                ]
+            )
+        )
+        archive.link_chat_contact(7, "operator-contact")
+        archive.link_chat_contact(7, "alex-contact")
+
+    service = _service(tmp_path)
+    service.update_operator_profile({"name": "Debbie", "contact_id": "operator-contact"})
+    chat = service.chat(7)
+    orbit = service.orbit(direction="incoming", days=0)
+
+    assert [contact["contact_id"] for contact in chat["contacts"]] == ["alex-contact"]
+    assert orbit["items"][0]["contacts"] == "Alex"
+
+
 def test_web_contact_review_stays_local_and_can_prepare_a_vcard(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
 

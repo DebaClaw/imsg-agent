@@ -279,6 +279,12 @@ class OperatorService:
             seed = archive.chat_context_seed(chat_id)
             contacts = archive.chat_contacts(chat_id)
         store = MessageStore(self.data_dir)
+        operator_contact_id = str(store.read_operator_profile().get("contact_id") or "")
+        contacts = [
+            contact
+            for contact in contacts
+            if str(contact.get("contact_id") or "") != operator_contact_id
+        ]
         context, notes = store.read_chat_context_document(chat_id)
         review, review_notes = store.read_contact_review(chat_id)
         recipients = self._recipient_participants(seed.get("participants") or [])
@@ -824,9 +830,12 @@ class OperatorService:
                 orbit_by_chat[chat_id] = dict(row)
         orbit: JSONList = []
         importance = store.read_contact_importance()
+        operator = self.operator_profile()
+        operator_names = self._operator_display_names(operator)
         for row in orbit_by_chat.values():
             context = store.read_chat_context(int(str(row["chat_id"])))
             row = dict(row)
+            row["contacts"] = self._without_operator_names(row.get("contacts"), operator_names)
             row["favorite"] = bool(context.get("favorite"))
             row["relationship"] = str(context.get("relationship") or "unclassified")
             row["relationship_priority"] = self._relationship_priority(row["relationship"])
@@ -856,6 +865,23 @@ class OperatorService:
             reverse=True,
         )
         return orbit[:limit]
+
+    @staticmethod
+    def _operator_display_names(profile: JSON) -> set[str]:
+        values = {
+            "me",
+            str(profile.get("display_name") or "").strip().casefold(),
+            str(profile.get("name") or "").strip().casefold(),
+        }
+        contact = profile.get("contact")
+        if isinstance(contact, dict):
+            values.add(str(contact.get("full_name") or "").strip().casefold())
+        return {value for value in values if value}
+
+    @staticmethod
+    def _without_operator_names(value: object, operator_names: set[str]) -> str:
+        names = [item.strip() for item in str(value or "").split(",") if item.strip()]
+        return ", ".join(name for name in names if name.casefold() not in operator_names)
 
     @staticmethod
     def _relationship_priority(relationship: object) -> int:

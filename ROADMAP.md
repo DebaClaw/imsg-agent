@@ -283,6 +283,10 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Add incoming/outgoing/either direction and time-window controls
   - ✅ Page through all matching threads without overcrowding the attention field
 
+#### Operator Recipient Presentation
+- ✅ **Exclude the operator from conversation labels**
+  - ✅ Remove the configured operator contact from Orbit and chat contact displays
+
 #### macOS Administration
 - ✅ **Service admin scripts**
   - ✅ Add consistent start, stop, restart, status, and log controls for monitor, worker, and web

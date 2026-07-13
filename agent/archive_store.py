@@ -891,11 +891,15 @@ class IMessageArchive:
                     AND outbound.date >= ? AND outbound.is_from_me = 1) AS outbound_90d,
                 (
                     SELECT GROUP_CONCAT(full_name, ', ') FROM (
-                        SELECT DISTINCT contacts.full_name AS full_name
-                        FROM chat_contact_matches matches
-                        JOIN contacts ON contacts.contact_id = matches.contact_id
-                        WHERE matches.chat_id = c.id AND matches.status = 'matched'
-                            AND contacts.full_name != ''
+                        SELECT contacts.full_name
+                        FROM contacts
+                        WHERE contacts.contact_id IN (
+                            SELECT contact_id FROM chat_contact_matches
+                            WHERE chat_id = c.id AND status = 'matched'
+                            UNION
+                            SELECT contact_id FROM manual_contact_links
+                            WHERE chat_id = c.id
+                        ) AND contacts.full_name != ''
                         ORDER BY contacts.full_name
                     )
                 ) AS contacts,
