@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import signal
+from contextlib import suppress
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -333,10 +334,23 @@ async def run_monitor(args: argparse.Namespace) -> None:
             include_attachments=not args.no_attachments,
         )
     )
+    stop_task = asyncio.create_task(stop_event.wait())
     try:
-        await stop_event.wait()
+        done, _ = await asyncio.wait(
+            {monitor_task, stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if monitor_task in done:
+            monitor_task.result()
     finally:
-        monitor_task.cancel()
+        if not monitor_task.done():
+            monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await monitor_task
+        if not stop_task.done():
+            stop_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await stop_task
         await rpc.stop()
         archive.close()
 

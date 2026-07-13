@@ -291,6 +291,9 @@ interfaces and AI workflows on top without making the archive depend on AI.
   - ✅ Restart loaded services with kickstart and allow enough time for macOS teardown
 - ✅ **Archive readiness**
   - ✅ Add an admin backfill command and diagnostic so a healthy monitor cannot leave Orbit empty
+- ✅ **Monitor liveness**
+  - ✅ Exit and let launchd restart when the archive subscription fails
+  - ✅ Make stalled archive freshness diagnosable from admin scripts
 
 #### AI Action Layer
 - ✅ `imsg-agent-worker` — archive-backed AI worker with independent draft cursor

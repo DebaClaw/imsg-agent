@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from agent.archive_main import _parser
+import argparse
+import asyncio
+from pathlib import Path
+
+import pytest
+
+from agent.archive_main import _parser, run_monitor
+from agent.config import Config
 
 
 def test_archive_cli_accepts_options_after_subcommand() -> None:
@@ -87,3 +94,63 @@ def test_archive_cli_has_visibility_commands() -> None:
     assert search.query == "coffee"
     assert search.chat_id == 7
     assert search.since == "2026-01-01"
+
+
+def test_archive_monitor_exits_when_subscription_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = Config(
+        imsg_binary=Path("imsg"),
+        data_dir=tmp_path,
+        rpc_timeout_seconds=30,
+        rpc_read_limit_bytes=1024,
+        watch_debounce_ms=250,
+        history_limit=50,
+        chat_context_messages=20,
+        auto_approve=False,
+        default_service="auto",
+        max_inbox_age_hours=48,
+        openai_api_key=None,
+        draft_model="gpt-5.5",
+        maintenance_interval_seconds=5.0,
+        nudge_after_hours=72,
+        contacts_command="contacts-mcp",
+        contacts_store=None,
+    )
+    events: list[str] = []
+
+    class FakeArchive:
+        def __init__(self, _path: Path) -> None:
+            pass
+
+        def close(self) -> None:
+            events.append("archive.close")
+
+    class FakeRPC:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def start(self) -> None:
+            events.append("rpc.start")
+
+        async def stop(self) -> None:
+            events.append("rpc.stop")
+
+    class FailingArchiver:
+        def __init__(self, _archive: FakeArchive, _rpc: FakeRPC) -> None:
+            pass
+
+        async def monitor(self, **_kwargs: object) -> None:
+            raise RuntimeError("subscription lost")
+
+    monkeypatch.setattr("agent.archive_main.load_config", lambda: config)
+    monkeypatch.setattr("agent.archive_main.IMessageArchive", FakeArchive)
+    monkeypatch.setattr("agent.archive_main.IMsgRPCClient", FakeRPC)
+    monkeypatch.setattr("agent.archive_main.IMessageArchiver", FailingArchiver)
+    args = argparse.Namespace(db=None, since_rowid=None, no_attachments=False)
+
+    with pytest.raises(RuntimeError, match="subscription lost"):
+        asyncio.run(run_monitor(args))
+
+    assert events == ["rpc.start", "rpc.stop", "archive.close"]

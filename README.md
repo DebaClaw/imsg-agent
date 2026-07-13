@@ -247,6 +247,7 @@ before expecting Orbit to show conversations:
 ```bash
 scripts/imsg-archive backfill
 scripts/imsg-archive stats
+scripts/imsg-archive diagnose
 ```
 
 ## Archive-Backed AI Worker
@@ -319,6 +320,7 @@ scripts/imsg-monitor restart
 scripts/imsg-worker restart
 scripts/imsg-web restart
 scripts/imsg-archive backfill
+scripts/imsg-archive diagnose
 scripts/imsg-admin all status
 scripts/imsg-admin worker logs --errors --lines 120
 scripts/imsg-admin web logs --lines 120

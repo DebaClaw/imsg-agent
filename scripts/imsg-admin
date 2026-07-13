@@ -9,7 +9,7 @@ usage() {
 Usage: scripts/imsg-admin {archive|monitor|worker|web|all} ACTION [options]
 
 Components:
-  archive   Historical SQLite archive maintenance (backfill or stats)
+  archive   Historical SQLite archive maintenance (backfill, stats, or diagnose)
   monitor   Archive monitor LaunchAgent (imsg rpc -> local SQLite archive)
   worker    Archive-backed AI worker LaunchAgent
   web       Local web GUI process
@@ -19,6 +19,7 @@ Examples:
   scripts/imsg-admin monitor restart
   scripts/imsg-admin archive backfill --no-attachments
   scripts/imsg-admin archive stats
+  scripts/imsg-admin archive diagnose
   scripts/imsg-admin worker logs --errors --lines 120
   scripts/imsg-admin web restart --port 8787
   scripts/imsg-admin all status
@@ -50,8 +51,8 @@ if [[ ! "$component" =~ ^(archive|monitor|worker|web|all)$ ]]; then
   usage >&2
   exit 2
 fi
-if [[ "$component" == "archive" && ! "$action" =~ ^(backfill|stats)$ ]]; then
-  echo "Archive supports backfill or stats." >&2
+if [[ "$component" == "archive" && ! "$action" =~ ^(backfill|stats|diagnose)$ ]]; then
+  echo "Archive supports backfill, stats, or diagnose." >&2
   usage >&2
   exit 2
 fi
@@ -81,6 +82,21 @@ run_component() {
   local requested_action="$2"
   shift 2
   if [[ "$name" == "archive" ]]; then
+    if [[ "$requested_action" == "diagnose" ]]; then
+      local data_dir="${IMSG_DATA_DIR:-$HOME/imsg-data}"
+      (
+        cd "$REPO_DIR"
+        "${UV_BIN:?uv not found}" run imsg-archive stats
+        echo
+        echo "newest archived thread"
+        "${UV_BIN:?uv not found}" run imsg-archive recent --limit 1
+        echo
+        echo "monitor logs"
+        echo "  $data_dir/logs/imsg-archive-monitor.log"
+        echo "  $data_dir/logs/imsg-archive-monitor.err.log"
+      )
+      return
+    fi
     (
       cd "$REPO_DIR"
       exec "${UV_BIN:?uv not found}" run imsg-archive "$requested_action" "$@"
