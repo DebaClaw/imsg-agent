@@ -11,6 +11,7 @@ const state = {
   contactsQuery: "",
   contactsOffset: 0,
   contactEditor: null,
+  targetMessageRowid: null,
   orbitDirection: "incoming",
   orbitDays: 7,
   orbitIncludeSpam: false,
@@ -522,21 +523,42 @@ function easeOutExpo(value) {
 }
 
 function rowButton(row, extra = {}) {
-  const button = el("button", "row-item");
-  button.type = "button";
-  button.append(el("h3", "", nameOf(row)));
-  button.append(el("p", "", snippet(row.last_text || row.text || row.proposed_text || row.reason || "")));
+  const item = el("article", "row-item");
+  const contactIds = text(row.contact_ids).split(",").map((value) => value.trim()).filter(Boolean);
+  const contact = el("button", "row-contact-link", nameOf(row));
+  contact.type = "button";
+  contact.setAttribute("aria-label", `Open contact ${nameOf(row)}`);
+  contact.addEventListener("click", () => {
+    if (contactIds.length === 1) {
+      openContactFromSummary(contactIds[0]).catch((error) => showError(error.message));
+      return;
+    }
+    openChat({ ...row, ...extra }, { panel: "context" }).catch((error) => showError(error.message));
+  });
+  item.append(contact);
+
+  const message = el(
+    "button",
+    "row-message-link",
+    snippet(row.last_text || row.text || row.proposed_text || row.reason || ""),
+  );
+  message.type = "button";
+  message.setAttribute("aria-label", `Open message from ${nameOf(row)}`);
+  if (row.chat_id) {
+    message.addEventListener("click", () => openChat(
+      { ...row, ...extra },
+      { panel: "messages", messageRowid: row.message_rowid },
+    ).catch((error) => showError(error.message)));
+  } else {
+    message.disabled = true;
+  }
+  item.append(message);
   const meta = el("div", "meta-line");
   meta.append(el("span", "", when(row.last_message_at || row.message_at)));
   if (row.draft_status) meta.append(el("span", "status-chip", row.draft_status));
   if (row.score) meta.append(el("span", "", `score ${row.score}`));
-  button.append(meta);
-  if (row.chat_id) {
-    button.addEventListener("click", () => openChat({ ...row, ...extra }));
-  } else {
-    button.disabled = true;
-  }
-  return button;
+  item.append(meta);
+  return item;
 }
 
 function renderPending(rows, preferences = {}) {
@@ -794,6 +816,11 @@ async function openContact(contactId) {
   list.append(panel);
 }
 
+async function openContactFromSummary(contactId) {
+  await loadContacts(state.contactsQuery, 0);
+  await openContact(contactId);
+}
+
 function openNewContact(seed = {}) {
   state.contactEditor = null;
   setContactsSyncLabel(false);
@@ -935,10 +962,12 @@ function safeJsonArray(value) {
   }
 }
 
-async function openChat(row) {
+async function openChat(row, { panel = null, messageRowid = null } = {}) {
   const sameChat = Number(state.selectedRow?.chat_id) === Number(row.chat_id);
   state.selectedRow = row;
-  if (!sameChat) state.chatPanel = "messages";
+  if (panel) state.chatPanel = panel;
+  else if (!sameChat) state.chatPanel = "messages";
+  state.targetMessageRowid = messageRowid ? Number(messageRowid) : null;
   const chatId = row.chat_id;
   if (!chatId) return;
   document.body.classList.add("chat-selected");
@@ -948,6 +977,7 @@ async function openChat(row) {
     state.selectedChat = payload;
     state.selectedRow = { ...row, ...(payload.reply || {}) };
     renderChat(payload, state.selectedRow);
+    focusTargetMessage();
   } catch (error) {
     showError(error.message);
   }
@@ -967,6 +997,7 @@ function closeWorkbench() {
   document.body.classList.remove("chat-selected");
   state.selectedRow = null;
   state.selectedChat = null;
+  state.targetMessageRowid = null;
   state.chatPanel = "messages";
   const pane = detailPane();
   pane.replaceChildren();
@@ -1035,6 +1066,11 @@ function renderChat(payload, row) {
   }
   (payload.messages || []).forEach((message) => {
     const rowNode = el("div", `message-row ${message.is_from_me ? "mine" : "theirs"}`);
+    rowNode.dataset.messageRowid = text(message.message_rowid);
+    rowNode.classList.toggle(
+      "target-message",
+      Number(message.message_rowid) === Number(state.targetMessageRowid),
+    );
     rowNode.append(el("div", "sender-label", senderLabel(message, payload, row)));
     const bubble = el("div", "message-bubble");
     bubble.append(el("div", "", text(message.text, "(no text)")));
@@ -1045,6 +1081,14 @@ function renderChat(payload, row) {
   messagesPane.append(timeline);
   wrap.append(workspace);
   pane.append(wrap);
+}
+
+function focusTargetMessage() {
+  if (!state.targetMessageRowid) return;
+  const pane = detailPane();
+  const target = pane.querySelector(`[data-message-rowid="${state.targetMessageRowid}"]`);
+  if (!target) return;
+  window.requestAnimationFrame(() => target.scrollIntoView({ block: "center", behavior: "smooth" }));
 }
 
 function switchChatPanel(panel) {

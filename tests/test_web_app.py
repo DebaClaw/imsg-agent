@@ -129,6 +129,11 @@ def test_web_chat_returns_context_and_messages(tmp_path: Path) -> None:
 
 def test_web_recent_and_attention_include_reply_workflow_state(tmp_path: Path) -> None:
     _seed_archive(tmp_path)
+    with IMessageArchive(tmp_path / "imessage.sqlite") as archive:
+        archive.replace_contacts(
+            contacts_from_json([{"id": "contact-1", "fullName": "Alex"}])
+        )
+        archive.link_chat_contact(7, "contact-1")
     MessageStore(tmp_path).write_draft(_draft())
 
     service = _service(tmp_path)
@@ -142,6 +147,7 @@ def test_web_recent_and_attention_include_reply_workflow_state(tmp_path: Path) -
         assert row["channel"] == "iMessage"
         assert row["direction"] == "inbound"
         assert row["can_request_draft"] is True
+        assert row["contact_ids"] == "contact-1"
 
 
 def test_web_recent_exposes_outbound_latest_message_for_follow_up(tmp_path: Path) -> None:
