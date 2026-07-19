@@ -127,7 +127,7 @@ run_component() {
       tail -n "$lines" "$log_dir/$log_name"
       return
     fi
-    exec "$REPO_DIR/scripts/imsg-agent" "$@"
+    exec "$REPO_DIR/scripts/imsg-agent" "$requested_action" "$@"
   fi
   if [[ "$requested_action" == "logs" ]]; then
     (
